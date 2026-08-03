@@ -3,12 +3,17 @@
 package e2e
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,46 +42,62 @@ func TestGitHubOAuthCrossReplicaPreservesCredentialBoundaries(t *testing.T) {
 	b := newGitHubOAuthReplica(t, database, idp, oidc, public.URL)
 	public.Config.Handler = replicaHandler(a, b)
 
-	jar, err := cookiejar.New(nil)
+	oidcJar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	browser := public.Client()
-	browser.Jar = jar
-	browser.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	oidcBrowser := public.Client()
+	oidcBrowser.Jar = oidcJar
+	oidcBrowser.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
-	assertGitHubOAuthConfig(t, browser, public.URL)
+	assertGitHubOAuthConfig(t, oidcBrowser, public.URL)
 
-	oidcLogin := startBrowserLogin(t, browser, public.URL+"/auth/oidc/login", "A")
-	assertBrowserCallbackFails(t, browser, public.URL+"/auth/oauth/github/callback", oidcLogin.state, "B")
-	completeOIDCLogin(t, browser, oidcLogin.authorize, "B")
-	assertOIDCRepositoryStatus(t, browser, public.URL, "B", http.StatusOK)
+	oidcLogin := startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oidc/login", "A")
+	assertBrowserCallbackFails(t, oidcBrowser, public.URL+"/auth/oauth/github/callback", oidcLogin.state, "B")
+	completeOIDCLogin(t, oidcBrowser, oidcLogin.authorize, "B")
+	assertOIDCRepositoryStatus(t, oidcBrowser, public.URL, "B", http.StatusOK)
 
-	githubLogin := startBrowserLogin(t, browser, public.URL+"/auth/oauth/github/login", "A")
-	githubCookie := loginCookie(t, jar, public.URL, "__Host-grepnest_oauth_github_login")
-	assertBrowserCallbackFails(t, browser, public.URL+"/auth/oidc/callback", githubLogin.state, "B")
-	githubCallback := completeGitHubOAuthLogin(t, browser, githubLogin.authorize, "B")
-	assertOIDCRepositoryStatus(t, browser, public.URL, "B", http.StatusOK)
+	githubJar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	githubBrowser := public.Client()
+	githubBrowser.Jar = githubJar
+	githubBrowser.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	assertNoCookie(t, githubJar, public.URL, authn.SessionCookieName)
+
+	githubLogin := startBrowserLogin(t, githubBrowser, public.URL+"/auth/oauth/github/login", "A")
+	githubCookie := loginCookie(t, githubJar, public.URL, "__Host-grepnest_oauth_github_login")
+	assertGitHubOAuthFlowPersistence(t, database, githubLogin.state, githubCookie)
+	assertBrowserCallbackFails(t, githubBrowser, public.URL+"/auth/oidc/callback", githubLogin.state, "B")
+	githubCallback := completeGitHubOAuthLogin(t, githubBrowser, githubLogin.authorize, "B")
+	assertOIDCRepositoryStatus(t, githubBrowser, public.URL, "B", http.StatusOK)
 	assertCallbackReplayFails(t, public.Client(), githubCallback, githubCookie)
 
-	session := sessionCookie(t, jar, public.URL)
-	assertMCPStatus(t, browser, public.URL, http.StatusUnauthorized)
+	session := sessionCookie(t, githubJar, public.URL)
+	assertMCPStatus(t, githubBrowser, public.URL, http.StatusUnauthorized)
 	bearer := newGitHubOAuthBearer(t, database)
 	assertBearerStatus(t, public.Client(), public.URL, bearer, "/v1/repositories/101", http.StatusOK)
 	assertMCPRepositoryAccess(t, public, bearer)
-	assertMixedCredentialsRejected(t, browser, public.URL, bearer)
-	logout(t, browser, public.URL, "B")
-	assertOIDCSessionStatus(t, browser, public.URL, "B", http.StatusUnauthorized)
+	assertMixedCredentialsRejected(t, githubBrowser, public.URL, bearer)
+	logout(t, githubBrowser, public.URL, "B")
+	assertOIDCSessionStatus(t, githubBrowser, public.URL, "B", http.StatusUnauthorized)
 	assertSessionReplayFails(t, public.Client(), public.URL, session)
-	assertGitHubOAuthCanariesAbsent(t, database)
+	assertGitHubOAuthFailureHidesCanaries(t, public, idp)
 }
 
-type githubOAuthTestProvider struct{ server *httptest.Server }
+type githubOAuthTestProvider struct {
+	server       *httptest.Server
+	failExchange bool
+}
 
 const (
-	githubOAuthCodeCanary   = "github-oauth-code-canary"
-	githubOAuthTokenCanary  = "github-oauth-token-canary"
-	githubOAuthSecretCanary = "github-oauth-secret-canary"
+	githubOAuthCodeCanary    = "github-oauth-code-canary"
+	githubOAuthTokenCanary   = "github-oauth-token-canary"
+	githubOAuthSecretCanary  = "github-oauth-secret-canary"
+	githubOAuthStateCanary   = "github-oauth-state-canary-000001"
+	githubOAuthBrowserCanary = "github-oauth-browser-canary-0000"
+	githubOAuthNonceCanary   = "github-oauth-nonce-canary-000001"
 )
 
 func newGitHubOAuthTestProvider(t *testing.T) *githubOAuthTestProvider {
@@ -98,7 +119,7 @@ func (provider *githubOAuthTestProvider) linkID() string {
 func (provider *githubOAuthTestProvider) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	switch request.URL.Path {
 	case "/login/oauth/authorize":
-		if request.URL.Query().Get("scope") != "" {
+		if _, present := request.URL.Query()["scope"]; present {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -109,6 +130,11 @@ func (provider *githubOAuthTestProvider) serveHTTP(writer http.ResponseWriter, r
 		callback.RawQuery = query.Encode()
 		http.Redirect(writer, request, callback.String(), http.StatusSeeOther)
 	case "/login/oauth/access_token":
+		if provider.failExchange {
+			writer.WriteHeader(http.StatusBadGateway)
+			_, _ = writer.Write([]byte(githubOAuthCodeCanary + githubOAuthTokenCanary + githubOAuthSecretCanary))
+			return
+		}
 		if err := request.ParseForm(); err != nil || request.Form.Get("client_secret") != githubOAuthSecretCanary || request.Form.Get("code") != githubOAuthCodeCanary || request.Form.Get("code_verifier") == "" {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
@@ -149,9 +175,12 @@ func newGitHubOAuthReplica(t *testing.T, database milestoneDatabase, github *git
 	searchService := search.NewService(oidcSearchBackend{}, authz.NewPostgres(database.store), search.Limits{MaxResults: 10, MaxResponseBytes: 64 << 10})
 	mux := http.NewServeMux()
 	oidc := newOIDCClient(t, oidcProvider, publicURL)
+	githubProvider := githuboauth.NewProvider(client, database.store, sessions, nil, time.Minute)
+	flowRandom := []byte(githubOAuthStateCanary + githubOAuthBrowserCanary + githubOAuthNonceCanary)
+	githubProvider.Rand = bytes.NewReader(append(flowRandom, flowRandom...))
 	providers := []sso.Provider{
 		oidcclient.NewProvider(oidc, database.store, sessions, nil, time.Minute),
-		githuboauth.NewProvider(client, database.store, sessions, nil, time.Minute),
+		githubProvider,
 	}
 	httpapi.RegisterAuth(mux, false, false, true, providers, requestAuth, sessions, nil)
 	httpapi.RegisterRepositories(mux, requestAuth, repositories, 64<<10, 10, 64<<10)
@@ -316,6 +345,55 @@ func loginCookie(t *testing.T, jar http.CookieJar, baseURL, name string) *http.C
 	return nil
 }
 
+func assertNoCookie(t *testing.T, jar http.CookieJar, baseURL, name string) {
+	t.Helper()
+	endpoint, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range jar.Cookies(endpoint) {
+		if cookie.Name == name {
+			t.Fatal("unexpected session cookie")
+		}
+	}
+}
+
+func assertGitHubOAuthFlowPersistence(t *testing.T, database milestoneDatabase, state string, browser *http.Cookie) {
+	t.Helper()
+	stateRaw, err := base64.RawURLEncoding.DecodeString(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browserRaw, err := base64.RawURLEncoding.DecodeString(browser.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stateRaw) != githubOAuthStateCanary || string(browserRaw) != githubOAuthBrowserCanary {
+		t.Fatal("GitHub flow did not use deterministic state/browser canaries")
+	}
+	var stateHash, browserHash []byte
+	var nonce, verifier, returnTo string
+	if err := database.pool.QueryRow(t.Context(), `select state_hash,browser_hash,nonce,code_verifier,return_to from auth_login_flows where provider='github'`).Scan(&stateHash, &browserHash, &nonce, &verifier, &returnTo); err != nil {
+		t.Fatal(err)
+	}
+	wantState, wantBrowser := sha256.Sum256(stateRaw), sha256.Sum256(browserRaw)
+	if !bytes.Equal(stateHash, wantState[:]) || !bytes.Equal(browserHash, wantBrowser[:]) || nonce != base64.RawURLEncoding.EncodeToString([]byte(githubOAuthNonceCanary)) || verifier == "" || returnTo != "/" {
+		t.Fatal("GitHub login flow persistence is invalid")
+	}
+	credentialHashes := make([][]byte, 0, 3)
+	for _, credential := range []string{githubOAuthCodeCanary, githubOAuthTokenCanary, githubOAuthSecretCanary} {
+		hash := sha256.Sum256([]byte(credential))
+		credentialHashes = append(credentialHashes, hash[:])
+	}
+	var count int
+	if err := database.pool.QueryRow(t.Context(), `select count(*) from auth_login_flows where state_hash=any($1) or browser_hash=any($1) or nonce=any($2) or code_verifier=any($2) or return_to=any($2)`, credentialHashes, []string{githubOAuthCodeCanary, githubOAuthTokenCanary, githubOAuthSecretCanary}).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("OAuth credential canary persisted")
+	}
+}
+
 func assertCallbackReplayFails(t *testing.T, client *http.Client, callback string, cookie *http.Cookie) {
 	t.Helper()
 	copyClient := *client
@@ -412,13 +490,33 @@ func assertSessionReplayFails(t *testing.T, client *http.Client, baseURL string,
 	}
 }
 
-func assertGitHubOAuthCanariesAbsent(t *testing.T, database milestoneDatabase) {
+func assertGitHubOAuthFailureHidesCanaries(t *testing.T, public *httptest.Server, provider *githubOAuthTestProvider) {
 	t.Helper()
-	var count int
-	if err := database.pool.QueryRow(t.Context(), `select count(*) from auth_login_flows where nonce = any($1) or code_verifier = any($1)`, []string{githubOAuthCodeCanary, githubOAuthTokenCanary, githubOAuthSecretCanary}).Scan(&count); err != nil {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 {
-		t.Fatal("OAuth credential canary persisted")
+	client := public.Client()
+	client.Jar = jar
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	login := startBrowserLogin(t, client, public.URL+"/auth/oauth/github/login", "A")
+	provider.failExchange = true
+	t.Cleanup(func() { provider.failExchange = false })
+	response, err := client.Get(login.authorize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	response = browserRequest(t, client, response.Header.Get("Location"), "B")
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	output := string(body) + response.Header.Get("Location") + response.Header.Get("Set-Cookie")
+	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/?auth_error=authentication_failed" {
+		t.Fatalf("OAuth failure response status = %d", response.StatusCode)
+	}
+	for _, credential := range []string{githubOAuthCodeCanary, githubOAuthTokenCanary, githubOAuthSecretCanary} {
+		if strings.Contains(output, credential) {
+			t.Fatal("OAuth failure response leaked credential canary")
+		}
 	}
 }
