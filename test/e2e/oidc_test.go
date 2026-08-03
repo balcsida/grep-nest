@@ -107,6 +107,18 @@ func newOIDCPublicServer(t *testing.T) *httptest.Server {
 
 func newOIDCReplica(t *testing.T, database milestoneDatabase, idp *oidcTestProvider, publicURL string) http.Handler {
 	t.Helper()
+	client := newOIDCClient(t, idp, publicURL)
+	sessions := &authn.SessionManager{Store: database.store, IdleTTL: time.Hour, TTL: 2 * time.Hour}
+	authenticator := authn.RequestAuthenticator{Session: sessions, PublicOrigin: publicURL}
+	mux := http.NewServeMux()
+	httpapi.RegisterAuth(mux, false, false, true, []sso.Provider{oidcclient.NewProvider(client, database.store, sessions, nil, time.Minute)}, authenticator, sessions, nil)
+	httpapi.RegisterRepositories(mux, authenticator, &repository.Service{Store: database.store}, 64<<10, 10, 64<<10)
+	httpapi.RegisterSearch(mux, authenticator, search.NewService(oidcSearchBackend{}, authz.NewPostgres(database.store), search.Limits{MaxResults: 10, MaxResponseBytes: 64 << 10}), 64<<10, 64<<10)
+	return mux
+}
+
+func newOIDCClient(t *testing.T, idp *oidcTestProvider, publicURL string) *oidcclient.Client {
+	t.Helper()
 	public, err := url.Parse(publicURL)
 	if err != nil {
 		t.Fatal(err)
@@ -115,13 +127,7 @@ func newOIDCReplica(t *testing.T, database milestoneDatabase, idp *oidcTestProvi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := &authn.SessionManager{Store: database.store, IdleTTL: time.Hour, TTL: 2 * time.Hour}
-	authenticator := authn.RequestAuthenticator{Session: sessions, PublicOrigin: publicURL}
-	mux := http.NewServeMux()
-	httpapi.RegisterAuth(mux, false, false, true, []sso.Provider{&oidcclient.Provider{Client: client, Store: database.store, Sessions: sessions, LoginTTL: time.Minute}}, authenticator, sessions, nil)
-	httpapi.RegisterRepositories(mux, authenticator, &repository.Service{Store: database.store}, 64<<10, 10, 64<<10)
-	httpapi.RegisterSearch(mux, authenticator, search.NewService(oidcSearchBackend{}, authz.NewPostgres(database.store), search.Limits{MaxResults: 10, MaxResponseBytes: 64 << 10}), 64<<10, 64<<10)
-	return mux
+	return client
 }
 
 func seedOIDCAuthorization(t *testing.T, database milestoneDatabase) {
