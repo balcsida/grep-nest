@@ -735,10 +735,10 @@ components:
         actor_id: {type: string, maxLength: 128}
         target_type: {type: string, enum: [api_token, authentication, group, session, user]}
         target_id: {type: string, maxLength: 128}
-        authentication_method: {type: string, enum: ['', api_token, local, oidc, operator, scim_token]}
+        authentication_method: {type: string, enum: ['', api_token, local, oauth, oidc, operator, scim_token]}
         operation:
           type: string
-          enum: [oidc_login_succeeded, oidc_login_denied, local_login_succeeded, local_login_denied, logout, session_created, session_revoked, api_token_created, api_token_use_rejected, api_token_revoked, password_set, password_rotated, break_glass_password_set, user_suspended, user_restored, user_credentials_revoked, scim_user_created, scim_user_replaced, scim_user_patched, scim_user_deactivated, scim_user_deleted, scim_group_created, scim_group_replaced, scim_group_patched, scim_group_deleted, group_membership_changed, group_role_changed, group_repository_grant_changed, user_role_changed, user_repository_grant_changed, admin_mutation_denied]
+          enum: [oidc_login_succeeded, oidc_login_denied, oauth_login_succeeded, oauth_login_denied, local_login_succeeded, local_login_denied, logout, session_created, session_revoked, api_token_created, api_token_use_rejected, api_token_revoked, password_set, password_rotated, break_glass_password_set, user_suspended, user_restored, user_credentials_revoked, scim_user_created, scim_user_replaced, scim_user_patched, scim_user_deactivated, scim_user_deleted, scim_group_created, scim_group_replaced, scim_group_patched, scim_group_deleted, group_membership_changed, group_role_changed, group_repository_grant_changed, user_role_changed, user_repository_grant_changed, admin_mutation_denied]
         outcome: {type: string, enum: [success, denied, invalid, error]}
         request_id: {type: string, maxLength: 128}
         created_at: {type: string, format: date-time}
