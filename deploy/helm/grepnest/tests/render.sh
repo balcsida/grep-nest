@@ -104,6 +104,17 @@ helm template scim "$chart" -n grepnest -f "$minimal" \
 helm template break-glass "$chart" -n grepnest -f "$minimal" \
   -f "$optional" --set=breakGlass.enabled=true \
   --api-versions monitoring.coreos.com/v1/ServiceMonitor >"$tmp/break-glass.yaml"
+helm template github-oauth "$chart" -n grepnest -f "$minimal" \
+  --set=server.sso.githubOAuth.enabled=true \
+  --set-string=server.sso.githubOAuth.clientID=grepnest-github \
+  --set-string=server.sso.publicURL=https://grepnest.example.invalid \
+  --set-string=secrets.githubOAuth.name=grepnest-github-oauth >"$tmp/github-oauth.yaml"
+helm template github-break-glass "$chart" -n grepnest -f "$minimal" \
+  --set=breakGlass.enabled=true \
+  --set=server.sso.githubOAuth.enabled=true \
+  --set-string=server.sso.githubOAuth.clientID=grepnest-github \
+  --set-string=server.sso.publicURL=https://grepnest.example.invalid \
+  --set-string=secrets.githubOAuth.name=grepnest-github-oauth >"$tmp/github-break-glass.yaml"
 long_release=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzx
 helm template "$long_release" "$chart" -n grepnest -f "$minimal" >"$tmp/long-release.yaml"
 
@@ -352,6 +363,12 @@ require 'protocol: TCP, port: 443' "$tmp/allow-identity-provider-egress-spec.yam
 require 'mountPath: /var/run/secrets/grepnest/oidc/client-secret' "$tmp/optional.yaml"
 require 'secretName: grepnest-oidc' "$tmp/optional.yaml"
 reject 'GREPNEST_OIDC_CLIENT_SECRET: ' "$tmp/optional.yaml"
+require 'GREPNEST_OAUTH_GITHUB_CLIENT_ID: "grepnest-github"' "$tmp/github-oauth.yaml"
+require 'GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE: /var/run/secrets/grepnest/oauth-github/client-secret' "$tmp/github-oauth.yaml"
+require 'mountPath: /var/run/secrets/grepnest/oauth-github/client-secret' "$tmp/github-oauth.yaml"
+require 'secretName: grepnest-github-oauth' "$tmp/github-oauth.yaml"
+require 'readOnly: true' "$tmp/github-oauth.yaml"
+reject 'GREPNEST_OAUTH_GITHUB_(CA|CLIENT_SECRET):|oauth-github-ca|allow-github-oauth' "$tmp/github-oauth.yaml"
 require 'GREPNEST_SCIM_TOKEN_FILE: /var/run/secrets/grepnest/scim/token' "$tmp/optional.yaml"
 require 'mountPath: /var/run/secrets/grepnest/scim/token' "$tmp/optional.yaml"
 require 'secretName: grepnest-scim' "$tmp/optional.yaml"
@@ -363,11 +380,28 @@ reject 'GREPNEST_OIDC_' "$tmp/scim.yaml"
 reject 'GREPNEST_(USER|ADMIN)_(TOKEN|INSTALLATION_ID|REPOSITORY_IDS)' "$tmp/minimal.yaml"
 reject 'GREPNEST_BREAK_GLASS_ENABLED|BREAK_GLASS.*(PASSWORD|HASH|SALT)' "$tmp/minimal.yaml"
 require 'GREPNEST_BREAK_GLASS_ENABLED: "true"' "$tmp/break-glass.yaml"
+require 'GREPNEST_BREAK_GLASS_ENABLED: "true"' "$tmp/github-break-glass.yaml"
 reject 'BREAK_GLASS.*(PASSWORD|HASH|SALT)|^kind: Secret$' "$tmp/break-glass.yaml"
 expect_failure "$tmp/break-glass-type.err" helm template bad "$chart" -f "$minimal" \
   --set-string=breakGlass.enabled=true
 expect_failure "$tmp/break-glass-without-oidc.err" helm template bad "$chart" -f "$minimal" \
   --set=breakGlass.enabled=true
+
+expect_failure "$tmp/github-oauth-client-id.err" helm template bad "$chart" -f "$minimal" \
+  --set=server.sso.githubOAuth.enabled=true \
+  --set-string=secrets.githubOAuth.name=grepnest-github-oauth \
+  --set-string=server.sso.publicURL=https://grepnest.example.invalid
+expect_failure "$tmp/github-oauth-secret.err" helm template bad "$chart" -f "$minimal" \
+  --set=server.sso.githubOAuth.enabled=true \
+  --set-string=server.sso.githubOAuth.clientID=grepnest-github \
+  --set-string=server.sso.publicURL=https://grepnest.example.invalid
+expect_failure "$tmp/github-oauth-public-url.err" helm template bad "$chart" -f "$minimal" \
+  --set=server.sso.githubOAuth.enabled=true \
+  --set-string=server.sso.githubOAuth.clientID=grepnest-github \
+  --set-string=secrets.githubOAuth.name=grepnest-github-oauth \
+  --set-string=server.sso.publicURL=http://grepnest.example.invalid
+expect_failure "$tmp/github-oauth-enabled-type.err" helm template bad "$chart" -f "$minimal" \
+  --set-string=server.sso.githubOAuth.enabled=true
 
 expect_failure "$tmp/scim-secret.err" helm template bad "$chart" -f "$minimal" \
   --set=server.scim.enabled=true

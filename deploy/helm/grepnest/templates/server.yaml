@@ -85,6 +85,9 @@ spec:
             {{- if .Values.secrets.customCA.name }}
             - {name: custom-ca, mountPath: /var/run/secrets/grepnest/ca/ca.crt, subPath: ca.crt, readOnly: true}
             {{- end }}
+            {{- if .Values.server.sso.githubOAuth.enabled }}
+            - {name: oauth-github-client-secret, mountPath: /var/run/secrets/grepnest/oauth-github/client-secret, subPath: client-secret, readOnly: true}
+            {{- end }}
             {{- if .Values.server.scim.enabled }}
             - {name: scim-token, mountPath: /var/run/secrets/grepnest/scim/token, subPath: token, readOnly: true}
             {{- end }}
@@ -132,6 +135,13 @@ spec:
             items:
               - {key: {{ .Values.secrets.oidcCA.key }}, path: ca.crt}
         {{- end }}
+        {{- end }}
+        {{- if .Values.server.sso.githubOAuth.enabled }}
+        - name: oauth-github-client-secret
+          secret:
+            secretName: {{ .Values.secrets.githubOAuth.name }}
+            items:
+              - {key: {{ .Values.secrets.githubOAuth.clientSecretKey }}, path: client-secret}
         {{- end }}
         {{- if .Values.server.scim.enabled }}
         - name: scim-token

@@ -33,7 +33,7 @@ data:
   {{- if .Values.secrets.customCA.name }}
   GREPNEST_GITHUB_CA_FILE: /var/run/secrets/grepnest/ca/ca.crt
   {{- end }}
-  {{- if or .Values.server.sso.oidc.enabled .Values.server.scim.enabled }}
+  {{- if or .Values.server.sso.oidc.enabled .Values.server.sso.githubOAuth.enabled .Values.server.scim.enabled }}
   GREPNEST_PUBLIC_URL: {{ .Values.server.sso.publicURL | quote }}
   {{- end }}
   {{- if .Values.server.sso.oidc.enabled }}
@@ -49,6 +49,13 @@ data:
   {{- if .Values.secrets.oidcCA.name }}
   GREPNEST_OIDC_CA_FILE: /var/run/secrets/grepnest/oidc-ca/ca.crt
   {{- end }}
+  {{- end }}
+  {{- if .Values.server.sso.githubOAuth.enabled }}
+  GREPNEST_SSO_SESSION_IDLE: {{ .Values.server.sso.sessionIdle | quote }}
+  GREPNEST_SSO_SESSION_TTL: {{ .Values.server.sso.sessionTTL | quote }}
+  GREPNEST_SSO_LOGIN_FLOW_TTL: {{ .Values.server.sso.loginFlowTTL | quote }}
+  GREPNEST_OAUTH_GITHUB_CLIENT_ID: {{ .Values.server.sso.githubOAuth.clientID | quote }}
+  GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE: /var/run/secrets/grepnest/oauth-github/client-secret
   {{- end }}
   {{- if .Values.server.scim.enabled }}
   GREPNEST_SCIM_TOKEN_FILE: /var/run/secrets/grepnest/scim/token
