@@ -1,4 +1,4 @@
-package oidc
+package browserflow
 
 import (
 	"bytes"
@@ -19,6 +19,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+var oidcSpec = Spec{
+	Metadata:  sso.Metadata{ID: "oidc", Label: "Sign in with SSO", LoginURL: "/auth/oidc/login"},
+	LoginPath: "/auth/oidc/login", CallbackPath: "/auth/oidc/callback",
+	FlowProvider: authn.ProviderOIDC, IdentityProvider: authn.ProviderOIDC,
+	CookieName: sso.OIDCLoginCookieName, Method: authn.ProviderOIDC,
+	SuccessOperation: audit.OperationOIDCLoginSucceeded,
+	DeniedOperation:  audit.OperationOIDCLoginDenied,
+}
+
 type failingRecorder struct{ events []audit.Event }
 
 func (r *failingRecorder) Record(_ context.Context, event audit.Event) error {
@@ -28,13 +37,14 @@ func (r *failingRecorder) Record(_ context.Context, event audit.Event) error {
 
 func TestCallbackDenialIgnoresAuditFailure(t *testing.T) {
 	recorder := &failingRecorder{}
-	provider := &Provider{Audit: recorder}
+	provider := &Provider{Spec: oidcSpec, Audit: recorder}
 	response := httptest.NewRecorder()
 	provider.callback(response, httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?error=sentinel-claim", nil))
 	if response.Code != http.StatusSeeOther {
 		t.Fatalf("status=%d", response.Code)
 	}
-	if len(recorder.events) != 1 || strings.Contains(recorder.events[0].ActorID+recorder.events[0].TargetID, "sentinel") {
+	if len(recorder.events) != 1 || recorder.events[0].AuthenticationMethod != authn.ProviderOIDC ||
+		recorder.events[0].Operation != audit.OperationOIDCLoginDenied || strings.Contains(recorder.events[0].ActorID+recorder.events[0].TargetID, "sentinel") {
 		t.Fatalf("events=%#v", recorder.events)
 	}
 }
@@ -58,13 +68,14 @@ func (client *providerClient) Exchange(_ context.Context, code, verifier, nonce 
 }
 
 type providerStore struct {
-	flow        authn.LoginFlow
-	createErr   error
-	consumeErr  error
-	sessionErr  error
-	consumed    bool
-	consumeArgs [][32]byte
-	session     authn.SessionRecord
+	flow           authn.LoginFlow
+	createErr      error
+	consumeErr     error
+	sessionErr     error
+	consumed       bool
+	consumeArgs    [][32]byte
+	session        authn.SessionRecord
+	loginOperation string
 }
 
 func (store *providerStore) CreateLoginFlow(_ context.Context, flow authn.LoginFlow) error {
@@ -93,7 +104,8 @@ func (store *providerStore) CreateSession(_ context.Context, session authn.Sessi
 func (store *providerStore) CreateSessionAudited(ctx context.Context, session authn.SessionRecord, _ audit.Event) error {
 	return store.CreateSession(ctx, session)
 }
-func (store *providerStore) CreateFederatedSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord, _ string) error {
+func (store *providerStore) CreateFederatedSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord, operation string) error {
+	store.loginOperation = operation
 	userID, err := store.BindFederatedUser(ctx, identity.Issuer, identity.Subject, identity.LinkID)
 	if err != nil {
 		return err
@@ -127,6 +139,7 @@ func TestOIDCProviderLoginFailsClosedOnEntropyOrStoreErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			provider := &Provider{
+				Spec:   oidcSpec,
 				Client: &providerClient{}, Store: test.store, LoginTTL: time.Minute,
 				Rand: bytes.NewReader(test.random),
 			}
@@ -149,6 +162,7 @@ func TestOIDCProviderLoginCreatesBoundFlowAndRedirects(t *testing.T) {
 	store := &providerStore{}
 	client := &providerClient{}
 	provider := &Provider{
+		Spec:   oidcSpec,
 		Client: client, Store: store, LoginTTL: 10 * time.Minute, Now: func() time.Time { return now },
 		Rand: bytes.NewReader(random), Sessions: &authn.SessionManager{Store: store, TTL: time.Hour},
 	}
@@ -188,7 +202,7 @@ func TestOIDCProviderCallbackSuccessConsumesCreatesSessionAndRedirects(t *testin
 	}
 	if !fixture.store.consumed || fixture.client.code != "good" || fixture.client.verifier != fixture.store.flow.CodeVerifier ||
 		fixture.client.nonce != fixture.store.flow.Nonce || fixture.store.session.Provider != "oidc" ||
-		fixture.store.session.UserID != 1 {
+		fixture.store.session.UserID != 1 || fixture.store.loginOperation != audit.OperationOIDCLoginSucceeded {
 		t.Fatalf("callback side effects missing: store=%#v client=%#v", fixture.store, fixture.client)
 	}
 	cookies := recorder.Result().Cookies()
@@ -322,6 +336,26 @@ func TestOIDCProviderCallbackConsumesBeforeTerminalFailures(t *testing.T) {
 	}
 }
 
+func TestProviderCallbackRejectsWrongIdentityProvider(t *testing.T) {
+	fixture := newCallbackFixture(t)
+	fixture.client.identity.Provider = authn.ProviderOAuth
+	recorder := fixture.callback(t, "?state="+fixture.state+"&code=good", fixture.browser)
+	assertGenericFailure(t, recorder)
+	if !fixture.store.consumed || fixture.store.session.TokenHash != ([32]byte{}) {
+		t.Fatalf("consumed=%t session=%#v", fixture.store.consumed, fixture.store.session)
+	}
+}
+
+func TestProviderCallbackRejectsWrongFlowProvider(t *testing.T) {
+	fixture := newCallbackFixture(t)
+	fixture.store.flow.Provider = "wrong"
+	recorder := fixture.callback(t, "?state="+fixture.state+"&code=good", fixture.browser)
+	assertGenericFailure(t, recorder)
+	if fixture.store.consumed || fixture.store.session.TokenHash != ([32]byte{}) {
+		t.Fatalf("consumed=%t session=%#v", fixture.store.consumed, fixture.store.session)
+	}
+}
+
 func TestOIDCProviderCallbackRejectsReplayAndIgnoresReturnTargets(t *testing.T) {
 	fixture := newCallbackFixture(t)
 	first := fixture.callback(t, "?state="+fixture.state+"&code=good&return_to=https://evil.test", fixture.browser)
@@ -333,7 +367,7 @@ func TestOIDCProviderCallbackRejectsReplayAndIgnoresReturnTargets(t *testing.T) 
 }
 
 func TestOIDCProviderEnforcesGETMethods(t *testing.T) {
-	provider := &Provider{}
+	provider := &Provider{Spec: oidcSpec}
 	mux := http.NewServeMux()
 	provider.Register(mux)
 	for _, path := range []string{"/auth/oidc/login", "/auth/oidc/callback"} {
@@ -368,6 +402,7 @@ func newCallbackFixture(t *testing.T) *callbackFixture {
 		Provider: "oidc", Issuer: "https://issuer.example.test", Subject: "ada", LinkID: "directory-42", DisplayName: "Ada",
 	}}
 	provider := &Provider{
+		Spec:   oidcSpec,
 		Client: client, Store: store,
 		Sessions: &authn.SessionManager{Store: store, IdleTTL: time.Minute, TTL: time.Hour, Now: func() time.Time { return now }, Rand: bytes.NewReader(bytes.Repeat([]byte{4}, 32))},
 		Now:      func() time.Time { return now },

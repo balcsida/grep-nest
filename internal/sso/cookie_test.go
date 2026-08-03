@@ -18,7 +18,7 @@ func TestCookieAttributesAndExpiry(t *testing.T) {
 		wantSite http.SameSite
 	}{
 		{"session", SessionCookie("session", expires, now), "__Host-grepnest_session", http.SameSiteStrictMode},
-		{"OIDC", OIDCLoginCookie("browser", expires, now), "__Host-grepnest_oidc_login", http.SameSiteLaxMode},
+		{"login", LoginCookie("__Host-grepnest_oidc_login", "browser", expires, now), "__Host-grepnest_oidc_login", http.SameSiteLaxMode},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -33,7 +33,7 @@ func TestCookieAttributesAndExpiry(t *testing.T) {
 }
 
 func TestCookieDeletionUsesBrowserWireSemantics(t *testing.T) {
-	for _, cookie := range []*http.Cookie{ClearSessionCookie(), ClearOIDCLoginCookie()} {
+	for _, cookie := range []*http.Cookie{ClearSessionCookie(), ClearLoginCookie("__Host-grepnest_oidc_login")} {
 		if cookie.MaxAge != -1 || !cookie.Expires.Before(time.Now()) || cookie.Path != "/" ||
 			cookie.Domain != "" || !cookie.Secure || !cookie.HttpOnly {
 			t.Fatalf("cookie = %#v", cookie)

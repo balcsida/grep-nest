@@ -190,10 +190,11 @@ func newAuthRuntime(ctx context.Context, settings config.Config, store authn.Ses
 	}
 	runtime.requestAuth.Session = runtime.sessions
 	runtime.requestAuth.PublicOrigin = settings.SSO.PublicURL.Scheme + "://" + settings.SSO.PublicURL.Host
-	provider := &oidc.Provider{Client: client, Store: store, Sessions: runtime.sessions, LoginTTL: settings.SSO.LoginFlowTTL}
-	if recorder, ok := store.(audit.Recorder); ok {
-		provider.Audit = recorder
+	var recorder audit.Recorder
+	if candidate, ok := store.(audit.Recorder); ok {
+		recorder = candidate
 	}
+	provider := oidc.NewProvider(client, store, runtime.sessions, recorder, settings.SSO.LoginFlowTTL)
 	runtime.providers = []sso.Provider{provider}
 	return runtime, nil
 }

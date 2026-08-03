@@ -13,17 +13,15 @@ func SessionCookie(value string, expires, now time.Time) *http.Cookie {
 	return liveCookie(authn.SessionCookieName, value, expires, now, http.SameSiteStrictMode)
 }
 
-func OIDCLoginCookie(value string, expires, now time.Time) *http.Cookie {
-	return liveCookie(OIDCLoginCookieName, value, expires, now, http.SameSiteLaxMode)
+func LoginCookie(name, value string, expires, now time.Time) *http.Cookie {
+	return liveCookie(name, value, expires, now, http.SameSiteLaxMode)
 }
 
 func ClearSessionCookie() *http.Cookie {
 	return deletedCookie(authn.SessionCookieName, http.SameSiteStrictMode)
 }
 
-func ClearOIDCLoginCookie() *http.Cookie {
-	return deletedCookie(OIDCLoginCookieName, http.SameSiteLaxMode)
-}
+func ClearLoginCookie(name string) *http.Cookie { return deletedCookie(name, http.SameSiteLaxMode) }
 
 func liveCookie(name, value string, expires, now time.Time, sameSite http.SameSite) *http.Cookie {
 	maxAge := int(time.Until(expires).Seconds())
