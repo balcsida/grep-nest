@@ -104,7 +104,7 @@ func (client *Client) Exchange(ctx context.Context, code, verifier, _ string) (a
 		return authn.Identity{}, errors.New("GitHub user request failed")
 	}
 	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if response.StatusCode != http.StatusOK {
 		return authn.Identity{}, fmt.Errorf("GitHub user status %d", response.StatusCode)
 	}
 	data, err = boundedBody(response.Body)

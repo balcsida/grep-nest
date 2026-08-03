@@ -147,6 +147,20 @@ func TestExchangeStatusErrorsExcludeResponseBodiesAndCredentials(t *testing.T) {
 	}
 }
 
+func TestExchangeRejectsNonOKGitHubUserStatus(t *testing.T) {
+	fixture := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/oauth/access_token" {
+			fmt.Fprint(w, validToken())
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":42,"login":"ada"}`)
+	})
+	if _, err := fixture.client.Exchange(t.Context(), testCode, "verifier", ""); err == nil {
+		t.Fatal("GitHub user status 201 succeeded")
+	}
+}
+
 func TestExchangeRejectsUnsafeResponsesWithoutLeakingCanaries(t *testing.T) {
 	tests := []struct {
 		name, tokenBody, userBody string
