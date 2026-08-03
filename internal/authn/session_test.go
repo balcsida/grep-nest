@@ -107,6 +107,20 @@ func TestSessionManagerCreatesFederatedSessionsForSupportedProviders(t *testing.
 	}
 }
 
+func TestSessionManagerRejectsMismatchedFederatedLoginOperations(t *testing.T) {
+	for _, test := range []struct{ provider, operation string }{
+		{ProviderOIDC, audit.OperationOAuthLoginSucceeded},
+		{ProviderOAuth, audit.OperationOIDCLoginSucceeded},
+	} {
+		t.Run(test.provider, func(t *testing.T) {
+			manager := SessionManager{Store: &sessionStoreStub{}, IdleTTL: time.Minute, TTL: time.Hour}
+			if _, _, err := manager.Create(t.Context(), Identity{Provider: test.provider, Issuer: "https://issuer.example", Subject: "123", LinkID: "link-123"}, test.operation); err != ErrInvalidIdentity {
+				t.Fatalf("Create(%q, %q) error=%v", test.provider, test.operation, err)
+			}
+		})
+	}
+}
+
 func TestSessionManagerRejectsNonFederatedIdentityProviders(t *testing.T) {
 	for _, provider := range []string{ProviderLocal, "github", "unknown"} {
 		t.Run(provider, func(t *testing.T) {

@@ -30,7 +30,7 @@ type PreparedSession struct {
 }
 
 func (m SessionManager) Create(ctx context.Context, identity Identity, loginOperation string) (string, time.Time, error) {
-	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || !validIdentity(identity) || (identity.Provider != ProviderOIDC && identity.Provider != ProviderOAuth) {
+	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || !validIdentity(identity) || (identity.Provider != ProviderOIDC && identity.Provider != ProviderOAuth) || (identity.Provider == ProviderOIDC && loginOperation != audit.OperationOIDCLoginSucceeded) || (identity.Provider == ProviderOAuth && loginOperation != audit.OperationOAuthLoginSucceeded) {
 		return "", time.Time{}, ErrInvalidIdentity
 	}
 	prepared, err := m.PrepareForUser(1, identity.Provider, false)
