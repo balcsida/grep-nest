@@ -69,6 +69,8 @@ PostgreSQL is authoritative for repository metadata, authorization, queues, inde
 | Stdio MCP proxy | `grepnest-mcp` | Uses `GREPNEST_SERVER_URL` and `GREPNEST_TOKEN` |
 | Health and observability | `/healthz`, `/readyz`, `/metrics` | Intended for deployment health checks and monitoring |
 
+REST routes accept exactly one bearer credential or browser session; mixed credentials are rejected. MCP remains bearer-only.
+
 The complete REST contract is available in [`docs/openapi.yaml`](docs/openapi.yaml).
 
 ## Local quick start
