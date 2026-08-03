@@ -85,6 +85,27 @@ func TestAuditFailureRollsBackSecurityMutationFamilies(t *testing.T) {
 	}
 }
 
+func TestFederatedSessionAuditFailureRollsBackIdentityAndSession(t *testing.T) {
+	store := migratedStore(t)
+	insertIdentityUser(t, store, "github:https://github.com:123", "ada")
+	if _, err := store.pool.Exec(t.Context(), `drop table audit_events`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	identity := authn.Identity{Provider: authn.ProviderOAuth, Issuer: "https://github.com", Subject: "123", LinkID: "github:https://github.com:123"}
+	err := store.CreateFederatedSessionAudited(t.Context(), identity, authn.SessionRecord{
+		TokenHash: [32]byte{44}, AuditID: "cccccccccccccccccccccccccccccccc", Provider: authn.ProviderOAuth,
+		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), ExpiresAt: now.Add(time.Hour),
+	}, audit.OperationOAuthLoginSucceeded)
+	if err == nil {
+		t.Fatal("federated authentication survived audit failure")
+	}
+	var identities, sessions int
+	if err := store.pool.QueryRow(t.Context(), `select (select count(*) from user_identities),(select count(*) from auth_sessions)`).Scan(&identities, &sessions); err != nil || identities != 0 || sessions != 0 {
+		t.Fatalf("identities=%d sessions=%d err=%v", identities, sessions, err)
+	}
+}
+
 func TestLocalSuccessAuditFailureRollsBackThrottleAndCredentialState(t *testing.T) {
 	for _, rotation := range []bool{false, true} {
 		t.Run(map[bool]string{false: "login", true: "rotation"}[rotation], func(t *testing.T) {
@@ -253,7 +274,7 @@ func TestAuthenticationAndTokenOperationsUseSafeFixedEvents(t *testing.T) {
 	token, _, err := sessions.Create(ctx, authn.Identity{
 		Provider: "oidc", Issuer: "https://issuer.example", Subject: "subject-1",
 		LinkID: "directory-auth",
-	})
+	}, audit.OperationOIDCLoginSucceeded)
 	if err != nil {
 		t.Fatal(err)
 	}

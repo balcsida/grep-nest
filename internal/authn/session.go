@@ -29,8 +29,8 @@ type PreparedSession struct {
 	Record    SessionRecord
 }
 
-func (m SessionManager) Create(ctx context.Context, identity Identity) (string, time.Time, error) {
-	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || !validIdentity(identity) {
+func (m SessionManager) Create(ctx context.Context, identity Identity, loginOperation string) (string, time.Time, error) {
+	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || !validIdentity(identity) || (identity.Provider != ProviderOIDC && identity.Provider != ProviderOAuth) {
 		return "", time.Time{}, ErrInvalidIdentity
 	}
 	prepared, err := m.PrepareForUser(1, identity.Provider, false)
@@ -38,7 +38,7 @@ func (m SessionManager) Create(ctx context.Context, identity Identity) (string, 
 		return "", time.Time{}, err
 	}
 	prepared.Record.UserID = 0
-	if err := m.Store.CreateOIDCSessionAudited(ctx, identity, prepared.Record); err != nil {
+	if err := m.Store.CreateFederatedSessionAudited(ctx, identity, prepared.Record, loginOperation); err != nil {
 		return "", time.Time{}, err
 	}
 	return prepared.Token, prepared.ExpiresAt, nil
@@ -62,7 +62,7 @@ func (m SessionManager) CreateForUser(ctx context.Context, userID int64, provide
 }
 
 func (m SessionManager) PrepareForUser(userID int64, provider string, forceRotation bool) (PreparedSession, error) {
-	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || userID <= 0 || (provider != "oidc" && provider != "local") {
+	if m.Store == nil || m.IdleTTL <= 0 || m.TTL < m.IdleTTL || userID <= 0 || (provider != ProviderOIDC && provider != ProviderOAuth && provider != ProviderLocal) {
 		return PreparedSession{}, ErrInvalidIdentity
 	}
 	random := make([]byte, 32)

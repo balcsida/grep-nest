@@ -23,12 +23,12 @@ type SessionRecord struct {
 }
 
 type SessionStore interface {
-	BindOIDCUser(context.Context, string, string, string) (int64, error)
+	BindFederatedUser(context.Context, string, string, string) (int64, error)
 	CreateLoginFlow(context.Context, LoginFlow) error
 	ConsumeLoginFlow(context.Context, [32]byte, [32]byte, string, time.Time) (LoginFlow, error)
 	CreateSession(context.Context, SessionRecord) error
 	CreateSessionAudited(context.Context, SessionRecord, audit.Event) error
-	CreateOIDCSessionAudited(context.Context, Identity, SessionRecord) error
+	CreateFederatedSessionAudited(context.Context, Identity, SessionRecord, string) error
 	SessionPrincipal(context.Context, [32]byte, time.Time, time.Time) (Principal, error)
 	RevokeSession(context.Context, [32]byte) error
 	RevokeSessionAudited(context.Context, [32]byte) error

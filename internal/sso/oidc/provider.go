@@ -132,7 +132,7 @@ func (provider *Provider) callback(writer http.ResponseWriter, request *http.Req
 		provider.callbackFail(request.Context(), writer, "invalid")
 		return
 	}
-	token, expires, err := provider.Sessions.Create(request.Context(), identity)
+	token, expires, err := provider.Sessions.Create(request.Context(), identity, audit.OperationOIDCLoginSucceeded)
 	if err != nil {
 		provider.callbackFail(request.Context(), writer, "error")
 		return

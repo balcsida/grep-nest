@@ -8,6 +8,12 @@ import (
 
 var ErrInvalidIdentity = errors.New("invalid identity")
 
+const (
+	ProviderOIDC  = "oidc"
+	ProviderOAuth = "oauth"
+	ProviderLocal = "local"
+)
+
 type Identity struct {
 	Provider, Issuer, Subject, LinkID, DisplayName string
 }

@@ -22,9 +22,10 @@ type sessionStoreStub struct {
 	revoked                                [32]byte
 	createErr                              error
 	onCreate                               func()
+	loginOperation                         string
 }
 
-func (s *sessionStoreStub) BindOIDCUser(_ context.Context, issuer, subject, linkID string) (int64, error) {
+func (s *sessionStoreStub) BindFederatedUser(_ context.Context, issuer, subject, linkID string) (int64, error) {
 	s.boundIssuer, s.boundSubject, s.boundLinkID = issuer, subject, linkID
 	return 42, nil
 }
@@ -43,12 +44,13 @@ func (s *sessionStoreStub) CreateSession(_ context.Context, session SessionRecor
 func (s *sessionStoreStub) CreateSessionAudited(ctx context.Context, session SessionRecord, _ audit.Event) error {
 	return s.CreateSession(ctx, session)
 }
-func (s *sessionStoreStub) CreateOIDCSessionAudited(ctx context.Context, identity Identity, session SessionRecord) error {
-	userID, err := s.BindOIDCUser(ctx, identity.Issuer, identity.Subject, identity.LinkID)
+func (s *sessionStoreStub) CreateFederatedSessionAudited(ctx context.Context, identity Identity, session SessionRecord, loginOperation string) error {
+	userID, err := s.BindFederatedUser(ctx, identity.Issuer, identity.Subject, identity.LinkID)
 	if err != nil {
 		return err
 	}
 	session.UserID = userID
+	s.loginOperation = loginOperation
 	return s.CreateSession(ctx, session)
 }
 func (s *sessionStoreStub) SessionPrincipal(_ context.Context, hash [32]byte, now, idleUntil time.Time) (Principal, error) {
@@ -70,7 +72,7 @@ func TestSessionManagerCreatesOpaqueTokenForExactLinkID(t *testing.T) {
 	now := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
 	store := &sessionStoreStub{}
 	manager := SessionManager{Store: store, IdleTTL: 30 * time.Minute, TTL: 8 * time.Hour, Now: func() time.Time { return now }, Rand: bytes.NewReader(bytes.Repeat([]byte{7}, 32))}
-	token, expiresAt, err := manager.Create(t.Context(), Identity{Provider: "oidc", Issuer: "https://issuer.example.test", Subject: "subject", LinkID: "directory-42", DisplayName: "Ada"})
+	token, expiresAt, err := manager.Create(t.Context(), Identity{Provider: ProviderOIDC, Issuer: "https://issuer.example.test", Subject: "subject", LinkID: "directory-42", DisplayName: "Ada"}, audit.OperationOIDCLoginSucceeded)
 	if err != nil || expiresAt != now.Add(8*time.Hour) {
 		t.Fatalf("token=%q expiresAt=%v err=%v", token, expiresAt, err)
 	}
@@ -81,8 +83,52 @@ func TestSessionManagerCreatesOpaqueTokenForExactLinkID(t *testing.T) {
 	if store.boundIssuer != "https://issuer.example.test" || store.boundSubject != "subject" || store.boundLinkID != "directory-42" {
 		t.Fatalf("bound identity = %#v", store)
 	}
-	if store.session.UserID != 42 || store.session.Provider != "oidc" || store.session.TokenHash != sha256.Sum256(raw) || store.session.CreatedAt != now || store.session.LastSeenAt != now || store.session.IdleExpiresAt != now.Add(30*time.Minute) || store.session.ExpiresAt != now.Add(8*time.Hour) {
+	if store.session.UserID != 42 || store.session.Provider != ProviderOIDC || store.loginOperation != audit.OperationOIDCLoginSucceeded || store.session.TokenHash != sha256.Sum256(raw) || store.session.CreatedAt != now || store.session.LastSeenAt != now || store.session.IdleExpiresAt != now.Add(30*time.Minute) || store.session.ExpiresAt != now.Add(8*time.Hour) {
 		t.Fatalf("session = %#v", store.session)
+	}
+}
+
+func TestSessionManagerCreatesFederatedSessionsForSupportedProviders(t *testing.T) {
+	for _, test := range []struct{ provider, operation string }{
+		{ProviderOIDC, audit.OperationOIDCLoginSucceeded},
+		{ProviderOAuth, audit.OperationOAuthLoginSucceeded},
+	} {
+		t.Run(test.provider, func(t *testing.T) {
+			store := &sessionStoreStub{}
+			manager := SessionManager{Store: store, IdleTTL: time.Minute, TTL: time.Hour, Rand: bytes.NewReader(bytes.Repeat([]byte{7}, 32))}
+			_, _, err := manager.Create(t.Context(), Identity{Provider: test.provider, Issuer: "https://issuer.example", Subject: "123", LinkID: "link-123"}, test.operation)
+			if err != nil {
+				t.Fatalf("Create(%q): %v", test.provider, err)
+			}
+			if store.session.Provider != test.provider || store.loginOperation != test.operation {
+				t.Fatalf("session=%#v operation=%q", store.session, store.loginOperation)
+			}
+		})
+	}
+}
+
+func TestSessionManagerRejectsNonFederatedIdentityProviders(t *testing.T) {
+	for _, provider := range []string{ProviderLocal, "github", "unknown"} {
+		t.Run(provider, func(t *testing.T) {
+			manager := SessionManager{Store: &sessionStoreStub{}, IdleTTL: time.Minute, TTL: time.Hour}
+			if _, _, err := manager.Create(t.Context(), Identity{Provider: provider, Issuer: "https://issuer.example", Subject: "123", LinkID: "link-123"}, audit.OperationOIDCLoginSucceeded); err != ErrInvalidIdentity {
+				t.Fatalf("Create(%q) error=%v", provider, err)
+			}
+		})
+	}
+}
+
+func TestSessionManagerPreparesOnlyKnownSessionProviders(t *testing.T) {
+	manager := SessionManager{Store: &sessionStoreStub{}, IdleTTL: time.Minute, TTL: time.Hour}
+	for _, provider := range []string{ProviderOIDC, ProviderOAuth, ProviderLocal} {
+		if _, err := manager.PrepareForUser(1, provider, false); err != nil {
+			t.Fatalf("PrepareForUser(%q): %v", provider, err)
+		}
+	}
+	for _, provider := range []string{"github", "unknown"} {
+		if _, err := manager.PrepareForUser(1, provider, false); err != ErrInvalidIdentity {
+			t.Fatalf("PrepareForUser(%q) error=%v", provider, err)
+		}
 	}
 }
 

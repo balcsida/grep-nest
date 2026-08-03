@@ -53,7 +53,7 @@ func (s *localAuthStore) ClearLoginFailures(context.Context, [32]byte, [32]byte)
 	s.attempts = 0
 	return nil
 }
-func (*localAuthStore) BindOIDCUser(context.Context, string, string, string) (int64, error) {
+func (*localAuthStore) BindFederatedUser(context.Context, string, string, string) (int64, error) {
 	return 0, errors.New("unexpected OIDC bind")
 }
 func (*localAuthStore) CreateLoginFlow(context.Context, authn.LoginFlow) error {
@@ -69,7 +69,7 @@ func (s *localAuthStore) CreateSession(_ context.Context, session authn.SessionR
 func (s *localAuthStore) CreateSessionAudited(ctx context.Context, session authn.SessionRecord, _ audit.Event) error {
 	return s.CreateSession(ctx, session)
 }
-func (s *localAuthStore) CreateOIDCSessionAudited(context.Context, authn.Identity, authn.SessionRecord) error {
+func (s *localAuthStore) CreateFederatedSessionAudited(context.Context, authn.Identity, authn.SessionRecord, string) error {
 	return errors.New("unexpected OIDC session")
 }
 func (*localAuthStore) SessionPrincipal(context.Context, [32]byte, time.Time, time.Time) (authn.Principal, error) {

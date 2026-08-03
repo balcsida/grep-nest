@@ -93,15 +93,15 @@ func (store *providerStore) CreateSession(_ context.Context, session authn.Sessi
 func (store *providerStore) CreateSessionAudited(ctx context.Context, session authn.SessionRecord, _ audit.Event) error {
 	return store.CreateSession(ctx, session)
 }
-func (store *providerStore) CreateOIDCSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord) error {
-	userID, err := store.BindOIDCUser(ctx, identity.Issuer, identity.Subject, identity.LinkID)
+func (store *providerStore) CreateFederatedSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord, _ string) error {
+	userID, err := store.BindFederatedUser(ctx, identity.Issuer, identity.Subject, identity.LinkID)
 	if err != nil {
 		return err
 	}
 	session.UserID = userID
 	return store.CreateSession(ctx, session)
 }
-func (store *providerStore) BindOIDCUser(context.Context, string, string, string) (int64, error) {
+func (store *providerStore) BindFederatedUser(context.Context, string, string, string) (int64, error) {
 	return 1, nil
 }
 func (*providerStore) SessionPrincipal(context.Context, [32]byte, time.Time, time.Time) (authn.Principal, error) {

@@ -153,7 +153,7 @@ func adminSessionClient(t *testing.T, database milestoneDatabase, server *httpte
 	t.Helper()
 	token, _, err := (authn.SessionManager{Store: database.store, IdleTTL: time.Hour, TTL: 2 * time.Hour}).Create(t.Context(), authn.Identity{
 		Provider: "oidc", Issuer: "https://admin.example", Subject: "admin", LinkID: "directory-admin",
-	})
+	}, audit.OperationOIDCLoginSucceeded)
 	if err != nil {
 		t.Fatal(err)
 	}
