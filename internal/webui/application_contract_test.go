@@ -51,6 +51,7 @@ providers([
   {label:"Code host",login_url:"/auth/oauth/github/login"},
   {label:"External",login_url:"https://evil.example/login"},
   {label:"Protocol relative",login_url:"//evil.example/login"},
+  {label:"Backslash external",login_url:"/\\evil.example/login"},
 ]);
 if(JSON.stringify(links.map(link=>[link.textContent,link.href]))!==JSON.stringify([
   ["Corporate identity","/auth/oidc/login"],["Code host","/auth/oauth/github/login"]
