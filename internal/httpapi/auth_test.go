@@ -38,12 +38,15 @@ func (service *authSessionService) Revoke(_ context.Context, token string) error
 }
 
 func TestRegisterAuthConfigExposesOnlyEnabledMetadata(t *testing.T) {
-	provider := &authProvider{metadata: sso.Metadata{ID: "oidc", Label: "Sign in with SSO", LoginURL: "/auth/oidc/login"}}
+	providers := []*authProvider{
+		{metadata: sso.Metadata{ID: "oidc", Label: "Sign in with SSO", LoginURL: "/auth/oidc/login"}},
+		{metadata: sso.Metadata{ID: "github", Label: "Sign in with GitHub", LoginURL: "/auth/oauth/github/login"}},
+	}
 	mux := http.NewServeMux()
-	RegisterAuth(mux, true, true, false, []sso.Provider{provider}, authn.RequestAuthenticator{}, nil, nil)
+	RegisterAuth(mux, true, true, false, []sso.Provider{providers[0], providers[1]}, authn.RequestAuthenticator{}, nil, nil)
 	recorder := requestAuth(mux, http.MethodGet, "/v1/auth/config", "")
-	if recorder.Code != http.StatusOK || !provider.registered {
-		t.Fatalf("response=%d registered=%v", recorder.Code, provider.registered)
+	if recorder.Code != http.StatusOK || !providers[0].registered || !providers[1].registered {
+		t.Fatalf("response=%d registered=%v,%v", recorder.Code, providers[0].registered, providers[1].registered)
 	}
 	var body struct {
 		TokenLogin bool           `json:"token_login"`
@@ -54,7 +57,7 @@ func TestRegisterAuthConfigExposesOnlyEnabledMetadata(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.TokenLogin || !body.BreakGlass || body.FileReads || len(body.Providers) != 1 || body.Providers[0] != provider.metadata {
+	if !body.TokenLogin || !body.BreakGlass || body.FileReads || len(body.Providers) != 2 || body.Providers[0] != providers[0].metadata || body.Providers[1] != providers[1].metadata {
 		t.Fatalf("body = %#v", body)
 	}
 	for _, secret := range []string{"secret", "issuer", "client_id", "groups", "client_secret_file", "ca_file"} {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -77,15 +79,103 @@ func TestStaticHandlerHasNoBreakGlassSurface(t *testing.T) {
 	}
 }
 
-func TestAuthRuntimeWithoutOIDCUsesBearerOnly(t *testing.T) {
+func TestAuthRuntimeBuildsConfiguredBrowserProviders(t *testing.T) {
 	bearer := authn.NewStatic(map[string]authn.Principal{"user": {Subject: "user"}})
-	runtime, err := newAuthRuntime(t.Context(), config.Config{}, nil, bearer, observability.New())
+	settings, endpoints, httpClient := authRuntimeSettings(t)
+	for _, test := range []struct {
+		name          string
+		oidc, github  bool
+		wantProviders []string
+	}{
+		{"neither", false, false, nil},
+		{"OIDC only", true, false, []string{"oidc"}},
+		{"GitHub only", false, true, []string{"github"}},
+		{"OIDC then GitHub", true, true, []string{"oidc", "github"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			configured := settings
+			configured.SSO.OIDC.Enabled = test.oidc
+			configured.SSO.OAuth.GitHub.Enabled = test.github
+			runtime, err := newAuthRuntime(t.Context(), configured, nil, bearer, observability.New(), endpoints, httpClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			browserAuth := test.oidc || test.github
+			if (runtime.sessions != nil) != browserAuth || (runtime.requestAuth.Session != nil) != browserAuth || (runtime.requestAuth.PublicOrigin != "") != browserAuth {
+				t.Fatalf("browser runtime=%#v", runtime)
+			}
+			if browserAuth && runtime.requestAuth.Session != runtime.sessions {
+				t.Fatal("request authentication does not share the session manager")
+			}
+			got := make([]string, len(runtime.providers))
+			for index, provider := range runtime.providers {
+				got[index] = provider.Metadata().ID
+			}
+			if !slices.Equal(got, test.wantProviders) {
+				t.Fatalf("providers=%v want=%v", got, test.wantProviders)
+			}
+		})
+	}
+}
+
+func TestAuthRuntimeRejectsEmptyGitHubSecretWithoutDisclosure(t *testing.T) {
+	settings, endpoints, httpClient := authRuntimeSettings(t)
+	settings.SSO.OIDC.Enabled = false
+	settings.SSO.OAuth.GitHub.Enabled = true
+	settings.SSO.OAuth.GitHub.ClientID = "authorization-canary"
+	for _, secret := range []string{"", " \t\n"} {
+		t.Run(fmt.Sprintf("%q", secret), func(t *testing.T) {
+			secretFile := filepath.Join(t.TempDir(), "github-oauth-secret")
+			if err := os.WriteFile(secretFile, []byte(secret), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings.SSO.OAuth.GitHub.ClientSecretFile = secretFile
+			_, err := newAuthRuntime(t.Context(), settings, nil, nil, observability.New(), endpoints, httpClient)
+			if err == nil {
+				t.Fatal("empty GitHub OAuth secret accepted")
+			}
+			for _, canary := range []string{secret, settings.SSO.OAuth.GitHub.ClientID} {
+				if canary != "" && strings.Contains(err.Error(), canary) {
+					t.Fatalf("startup error disclosed authorization data: %q", err)
+				}
+			}
+		})
+	}
+}
+
+func authRuntimeSettings(t *testing.T) (config.Config, githubapp.Endpoints, *http.Client) {
+	t.Helper()
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/.well-known/openid-configuration" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"issuer": server.URL, "authorization_endpoint": server.URL + "/authorize",
+			"token_endpoint": server.URL + "/token", "jwks_uri": server.URL + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	}))
+	t.Cleanup(server.Close)
+	base, err := url.Parse(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.requestAuth.Bearer != bearer || runtime.requestAuth.Session != nil || runtime.sessions != nil || len(runtime.providers) != 0 {
-		t.Fatalf("runtime=%#v", runtime)
+	secretFile := filepath.Join(t.TempDir(), "client-secret")
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(secretFile, []byte("client-secret"), 0o600); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := config.Config{SSO: config.SSO{
+		PublicURL: &url.URL{Scheme: "https", Host: "grepnest.example", Path: "/"},
+		OIDC:      config.OIDC{Enabled: true, IssuerURL: server.URL, ClientID: "oidc-client", ClientSecretFile: secretFile, CAFile: caFile, Scopes: []string{"openid"}},
+		OAuth:     config.OAuth{GitHub: config.GitHubOAuth{Enabled: true, ClientID: "github-client", ClientSecretFile: secretFile}},
+	}}
+	return settings, githubapp.Endpoints{Web: base, API: base, Upload: base, Git: base}, server.Client()
 }
 
 func TestAPITokensAuthenticateRESTAndMCPBearerOnly(t *testing.T) {

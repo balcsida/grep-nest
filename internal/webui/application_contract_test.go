@@ -31,7 +31,37 @@ func TestConsoleProvidesBearerTokenSignInWithoutUnsupportedProviders(t *testing.
 	}
 }
 
-func TestConsolePrefersSameOriginOIDCSessionBeforeBearerFallback(t *testing.T) {
+func TestConsoleRendersTrustedProviderMetadataGenerically(t *testing.T) {
+	script, err := elementBody(string(document), "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	render, err := functionBody(script, "providers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `
+const links=[],host={replaceChildren(fragment){links.push(...fragment.children)}},document={
+  createDocumentFragment(){return {children:[],append(link){this.children.push(link)}}},
+  createElement(){return {}},
+},$=()=>host,location={origin:"https://grepnest.example"};
+` + render + `
+providers([
+  {label:"Corporate identity",login_url:"/auth/oidc/login"},
+  {label:"Code host",login_url:"/auth/oauth/github/login"},
+  {label:"External",login_url:"https://evil.example/login"},
+  {label:"Protocol relative",login_url:"//evil.example/login"},
+]);
+if(JSON.stringify(links.map(link=>[link.textContent,link.href]))!==JSON.stringify([
+  ["Corporate identity","/auth/oidc/login"],["Code host","/auth/oauth/github/login"]
+]))throw new Error("untrusted or reordered provider links: "+JSON.stringify(links));
+`
+	if output, err := exec.Command(requireNode(t), "-e", harness).CombinedOutput(); err != nil {
+		t.Fatalf("provider metadata contract failed: %v\n%s", err, output)
+	}
+}
+
+func TestConsolePrefersSameOriginBrowserSessionBeforeBearerFallback(t *testing.T) {
 	for _, want := range []string{
 		`/v1/auth/config`, `/v1/auth/session`, `Sign in with SSO`,
 		`credentials:"same-origin"`, `/auth/logout`, `await logout()`, `enterBearer`,

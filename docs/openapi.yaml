@@ -547,7 +547,7 @@ paths:
     get:
       responses:
         '200':
-          description: Token login availability and configured OIDC providers
+          description: Token login availability and configured browser identity providers
           content: {application/json: {schema: {$ref: '#/components/schemas/AuthConfig'}}}
   /v1/auth/session:
     get:
@@ -591,8 +591,14 @@ paths:
         '503': {$ref: '#/components/responses/Unavailable'}
   /auth/oidc/login:
     get:
-      responses: {'303': {description: Redirect to configured OIDC provider}}
+      responses: {'303': {description: Redirect to the configured browser identity provider}}
   /auth/oidc/callback:
+    get:
+      responses: {'303': {description: Redirect to the console}}
+  /auth/oauth/github/login:
+    get:
+      responses: {'303': {description: Redirect to the configured GitHub browser identity provider}}
+  /auth/oauth/github/callback:
     get:
       responses: {'303': {description: Redirect to the console}}
   /healthz:
@@ -676,7 +682,7 @@ components:
       type: object
       additionalProperties: false
       required: [method]
-      properties: {method: {type: string, enum: [bearer, oidc, local]}}
+      properties: {method: {type: string, enum: [bearer, oidc, oauth, local], example: oauth}}
     LocalLoginRequest:
       type: object
       additionalProperties: false

@@ -86,7 +86,36 @@ func TestAdminDocumentHidesContentUntilAuthorization(t *testing.T) {
 	}
 }
 
-func TestAdminPrefersSameOriginOIDCSessionBeforeBearerFallback(t *testing.T) {
+func TestAdminRendersTrustedProviderMetadataGenerically(t *testing.T) {
+	script, err := elementBody(string(adminDocument), "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	render, err := functionBody(script, "renderProviders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `
+const links=[],host={children:[],append(link){this.children.push(link);links.push(link)}},
+$=()=>host,clear=target=>target.children=[],el=(_tag,text)=>({textContent:text}),
+location={origin:"https://grepnest.example"};
+` + render + `
+renderProviders([
+  {label:"Corporate identity",login_url:"/auth/oidc/login"},
+  {label:"Code host",login_url:"/auth/oauth/github/login"},
+  {label:"External",login_url:"https://evil.example/login"},
+  {label:"Protocol relative",login_url:"//evil.example/login"},
+]);
+if(JSON.stringify(links.map(link=>[link.textContent,link.href]))!==JSON.stringify([
+  ["Corporate identity","/auth/oidc/login"],["Code host","/auth/oauth/github/login"]
+]))throw new Error("untrusted or reordered provider links: "+JSON.stringify(links));
+`
+	if output, err := exec.Command(requireNode(t), "-e", harness).CombinedOutput(); err != nil {
+		t.Fatalf("provider metadata contract failed: %v\n%s", err, output)
+	}
+}
+
+func TestAdminPrefersSameOriginBrowserSessionBeforeBearerFallback(t *testing.T) {
 	for _, want := range []string{
 		`/v1/auth/config`, `/v1/auth/session`, `Sign in with SSO`,
 		`credentials:"same-origin"`, `/auth/logout`, `await logout()`, `enterBearer`,
