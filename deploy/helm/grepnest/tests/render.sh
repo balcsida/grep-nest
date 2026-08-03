@@ -369,6 +369,9 @@ require 'mountPath: /var/run/secrets/grepnest/oauth-github/client-secret' "$tmp/
 require 'secretName: grepnest-github-oauth' "$tmp/github-oauth.yaml"
 require 'readOnly: true' "$tmp/github-oauth.yaml"
 reject 'GREPNEST_OAUTH_GITHUB_(CA|CLIENT_SECRET):|oauth-github-ca|allow-github-oauth' "$tmp/github-oauth.yaml"
+for key in GREPNEST_SSO_SESSION_IDLE GREPNEST_SSO_SESSION_TTL GREPNEST_SSO_LOGIN_FLOW_TTL; do
+  [ "$(grep -E -c -e "^  $key:" "$tmp/optional.yaml")" -eq 1 ] || exit 1
+done
 require 'GREPNEST_SCIM_TOKEN_FILE: /var/run/secrets/grepnest/scim/token' "$tmp/optional.yaml"
 require 'mountPath: /var/run/secrets/grepnest/scim/token' "$tmp/optional.yaml"
 require 'secretName: grepnest-scim' "$tmp/optional.yaml"

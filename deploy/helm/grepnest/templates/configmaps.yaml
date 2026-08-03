@@ -36,10 +36,12 @@ data:
   {{- if or .Values.server.sso.oidc.enabled .Values.server.sso.githubOAuth.enabled .Values.server.scim.enabled }}
   GREPNEST_PUBLIC_URL: {{ .Values.server.sso.publicURL | quote }}
   {{- end }}
-  {{- if .Values.server.sso.oidc.enabled }}
+  {{- if or .Values.server.sso.oidc.enabled .Values.server.sso.githubOAuth.enabled }}
   GREPNEST_SSO_SESSION_IDLE: {{ .Values.server.sso.sessionIdle | quote }}
   GREPNEST_SSO_SESSION_TTL: {{ .Values.server.sso.sessionTTL | quote }}
   GREPNEST_SSO_LOGIN_FLOW_TTL: {{ .Values.server.sso.loginFlowTTL | quote }}
+  {{- end }}
+  {{- if .Values.server.sso.oidc.enabled }}
   GREPNEST_OIDC_ISSUER_URL: {{ .Values.server.sso.oidc.issuerURL | quote }}
   GREPNEST_OIDC_CLIENT_ID: {{ .Values.server.sso.oidc.clientID | quote }}
   GREPNEST_OIDC_CLIENT_SECRET_FILE: /var/run/secrets/grepnest/oidc/client-secret
@@ -51,9 +53,6 @@ data:
   {{- end }}
   {{- end }}
   {{- if .Values.server.sso.githubOAuth.enabled }}
-  GREPNEST_SSO_SESSION_IDLE: {{ .Values.server.sso.sessionIdle | quote }}
-  GREPNEST_SSO_SESSION_TTL: {{ .Values.server.sso.sessionTTL | quote }}
-  GREPNEST_SSO_LOGIN_FLOW_TTL: {{ .Values.server.sso.loginFlowTTL | quote }}
   GREPNEST_OAUTH_GITHUB_CLIENT_ID: {{ .Values.server.sso.githubOAuth.clientID | quote }}
   GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE: /var/run/secrets/grepnest/oauth-github/client-secret
   {{- end }}
