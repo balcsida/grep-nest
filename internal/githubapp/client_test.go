@@ -387,6 +387,21 @@ func assertRequest(t *testing.T, r *http.Request, method, authorization string) 
 	}
 }
 
+func TestSharedAPIHelpersPreserveBasePathAndHeaders(t *testing.T) {
+	base, err := url.Parse("https://github.example/api/v3/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := EndpointURL(base, "repos", "a/b"); got != "https://github.example/api/v3/repos/a%2Fb" {
+		t.Fatalf("EndpointURL = %q", got)
+	}
+	header := make(http.Header)
+	SetAPIHeaders(header, "2022-11-28")
+	if header.Get("Accept") != "application/vnd.github+json" || header.Get("User-Agent") != "GrepNest" || header.Get("X-GitHub-Api-Version") != "2022-11-28" {
+		t.Fatalf("headers = %#v", header)
+	}
+}
+
 func signerAuthorization(t *testing.T, signer *Signer) string {
 	t.Helper()
 	jwt, err := signer.JWT()
