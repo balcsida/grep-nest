@@ -194,6 +194,38 @@ func TestOIDCProviderLoginCreatesBoundFlowAndRedirects(t *testing.T) {
 	assertPrivateHeaders(t, recorder)
 }
 
+func TestProviderUsesSpecifiedLoginCookieForLoginAndCallback(t *testing.T) {
+	const cookieName = "__Host-grepnest_test_browserflow_login"
+	spec := oidcSpec
+	spec.CookieName = cookieName
+
+	now := time.Unix(1_000, 0)
+	store := &providerStore{}
+	client := &providerClient{}
+	provider := &Provider{
+		Spec: spec, Client: client, Store: store, LoginTTL: time.Minute,
+		Now: func() time.Time { return now }, Rand: bytes.NewReader(bytes.Repeat([]byte{1}, 96)),
+	}
+	mux := http.NewServeMux()
+	provider.Register(mux)
+	login := httptest.NewRecorder()
+	mux.ServeHTTP(login, httptest.NewRequest(http.MethodGet, spec.LoginPath, nil))
+	if cookies := login.Result().Cookies(); len(cookies) != 1 || cookies[0].Name != cookieName {
+		t.Fatalf("login cookies=%#v", cookies)
+	}
+
+	fixture := newCallbackFixture(t)
+	fixture.provider.Spec.CookieName = cookieName
+	callback := fixture.callback(t, "?state="+fixture.state+"&code=good", fixture.browser)
+	if !fixture.store.consumed {
+		t.Fatal("callback did not consume the flow using the specified cookie")
+	}
+	cookies := callback.Result().Cookies()
+	if len(cookies) != 2 || cookies[0].Name != cookieName || cookies[0].MaxAge != -1 {
+		t.Fatalf("callback cookies=%#v", cookies)
+	}
+}
+
 func TestOIDCProviderCallbackSuccessConsumesCreatesSessionAndRedirects(t *testing.T) {
 	fixture := newCallbackFixture(t)
 	recorder := fixture.callback(t, "?state="+fixture.state+"&code=good", fixture.browser)
@@ -416,7 +448,7 @@ func (fixture *callbackFixture) callback(t *testing.T, query, browser string) *h
 	fixture.provider.Register(mux)
 	request := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback"+query, nil)
 	if browser != "" {
-		request.AddCookie(&http.Cookie{Name: sso.OIDCLoginCookieName, Value: browser})
+		request.AddCookie(&http.Cookie{Name: fixture.provider.Spec.CookieName, Value: browser})
 	}
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, request)
