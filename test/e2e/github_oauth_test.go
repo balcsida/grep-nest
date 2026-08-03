@@ -53,7 +53,9 @@ func TestGitHubOAuthCrossReplicaPreservesCredentialBoundaries(t *testing.T) {
 	assertGitHubOAuthConfig(t, oidcBrowser, public.URL)
 
 	oidcLogin := startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oidc/login", "A")
-	assertBrowserCallbackFails(t, oidcBrowser, public.URL+"/auth/oauth/github/callback", oidcLogin.state, "B")
+	startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oauth/github/login", "A")
+	loginCookie(t, oidcJar, public.URL, "__Host-grepnest_oauth_github_login")
+	assertBrowserCallbackFails(t, database, oidcBrowser, public.URL+"/auth/oauth/github/callback", oidcLogin.state, "B", public.URL)
 	completeOIDCLogin(t, oidcBrowser, oidcLogin.authorize, "B")
 	assertOIDCRepositoryStatus(t, oidcBrowser, public.URL, "B", http.StatusOK)
 
@@ -69,10 +71,12 @@ func TestGitHubOAuthCrossReplicaPreservesCredentialBoundaries(t *testing.T) {
 	githubLogin := startBrowserLogin(t, githubBrowser, public.URL+"/auth/oauth/github/login", "A")
 	githubCookie := loginCookie(t, githubJar, public.URL, "__Host-grepnest_oauth_github_login")
 	assertGitHubOAuthFlowPersistence(t, database, githubLogin.state, githubCookie)
-	assertBrowserCallbackFails(t, githubBrowser, public.URL+"/auth/oidc/callback", githubLogin.state, "B")
+	startBrowserLogin(t, githubBrowser, public.URL+"/auth/oidc/login", "A")
+	loginCookie(t, githubJar, public.URL, "__Host-grepnest_oidc_login")
+	assertBrowserCallbackFails(t, database, githubBrowser, public.URL+"/auth/oidc/callback", githubLogin.state, "B", public.URL)
 	githubCallback := completeGitHubOAuthLogin(t, githubBrowser, githubLogin.authorize, "B")
 	assertOIDCRepositoryStatus(t, githubBrowser, public.URL, "B", http.StatusOK)
-	assertCallbackReplayFails(t, public.Client(), githubCallback, githubCookie)
+	assertCallbackReplayFails(t, database, public.Client(), githubCallback, githubCookie, public.URL)
 
 	session := sessionCookie(t, githubJar, public.URL)
 	assertMCPStatus(t, githubBrowser, public.URL, http.StatusUnauthorized)
@@ -282,13 +286,16 @@ func completeGitHubOAuthLogin(t *testing.T, client *http.Client, authorize, repl
 	return response.Request.URL.String()
 }
 
-func assertBrowserCallbackFails(t *testing.T, client *http.Client, endpoint, state, replica string) {
+func assertBrowserCallbackFails(t *testing.T, database milestoneDatabase, client *http.Client, endpoint, state, replica, baseURL string) {
 	t.Helper()
+	before := sessionCount(t, database)
 	response := browserRequest(t, client, endpoint+"?code=unused&state="+url.QueryEscape(state), replica)
 	response.Body.Close()
-	if response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("cross-provider callback status = %d", response.StatusCode)
+	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/?auth_error=authentication_failed" {
+		t.Fatalf("cross-provider callback status = %d, location = %q", response.StatusCode, response.Header.Get("Location"))
 	}
+	assertNoCookie(t, client.Jar, baseURL, authn.SessionCookieName)
+	assertSessionCount(t, database, before)
 }
 
 func browserRequest(t *testing.T, client *http.Client, endpoint, replica string) *http.Response {
@@ -394,9 +401,15 @@ func assertGitHubOAuthFlowPersistence(t *testing.T, database milestoneDatabase, 
 	}
 }
 
-func assertCallbackReplayFails(t *testing.T, client *http.Client, callback string, cookie *http.Cookie) {
+func assertCallbackReplayFails(t *testing.T, database milestoneDatabase, client *http.Client, callback string, cookie *http.Cookie, baseURL string) {
 	t.Helper()
+	before := sessionCount(t, database)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	copyClient := *client
+	copyClient.Jar = jar
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, callback, nil)
 	if err != nil {
@@ -408,8 +421,26 @@ func assertCallbackReplayFails(t *testing.T, client *http.Client, callback strin
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("replayed callback status = %d", response.StatusCode)
+	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/?auth_error=authentication_failed" {
+		t.Fatalf("replayed callback status = %d, location = %q", response.StatusCode, response.Header.Get("Location"))
+	}
+	assertNoCookie(t, jar, baseURL, authn.SessionCookieName)
+	assertSessionCount(t, database, before)
+}
+
+func sessionCount(t *testing.T, database milestoneDatabase) int {
+	t.Helper()
+	var count int
+	if err := database.pool.QueryRow(t.Context(), `select count(*) from auth_sessions`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func assertSessionCount(t *testing.T, database milestoneDatabase, want int) {
+	t.Helper()
+	if got := sessionCount(t, database); got != want {
+		t.Fatalf("session count = %d, want %d", got, want)
 	}
 }
 
