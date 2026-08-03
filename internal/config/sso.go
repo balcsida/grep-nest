@@ -14,6 +14,15 @@ type SSO struct {
 	LoginFlowTTL time.Duration
 	BreakGlass   bool
 	OIDC         OIDC
+	OAuth        OAuth
+}
+
+type OAuth struct{ GitHub GitHubOAuth }
+
+type GitHubOAuth struct {
+	Enabled          bool
+	ClientID         string
+	ClientSecretFile string
 }
 
 type OIDC struct {
@@ -46,53 +55,82 @@ func loadSSO(databaseURL string) (SSO, error) {
 	issuerURL := os.Getenv("GREPNEST_OIDC_ISSUER_URL")
 	clientID := os.Getenv("GREPNEST_OIDC_CLIENT_ID")
 	clientSecretFile := os.Getenv("GREPNEST_OIDC_CLIENT_SECRET_FILE")
-	if issuerURL == "" && clientID == "" && clientSecretFile == "" {
+	githubClientID := os.Getenv("GREPNEST_OAUTH_GITHUB_CLIENT_ID")
+	githubClientSecretFile := os.Getenv("GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE")
+	oidcEnabled := issuerURL != "" || clientID != "" || clientSecretFile != ""
+	githubEnabled := githubClientID != "" || githubClientSecretFile != ""
+	if !oidcEnabled && !githubEnabled {
 		switch os.Getenv("GREPNEST_BREAK_GLASS_ENABLED") {
 		case "", "false":
 		case "true":
-			return SSO{}, invalid("GREPNEST_BREAK_GLASS_ENABLED requires OIDC")
+			return SSO{}, invalid("GREPNEST_BREAK_GLASS_ENABLED requires an external provider")
 		default:
 			return SSO{}, invalid("GREPNEST_BREAK_GLASS_ENABLED must be true or false")
 		}
 		return sso, nil
 	}
 	if databaseURL == "" {
-		return SSO{}, invalid("GREPNEST_DATABASE_URL is required for OIDC")
+		return SSO{}, invalid("GREPNEST_DATABASE_URL is required for browser SSO")
 	}
-	for _, setting := range []struct{ name, value string }{
-		{"GREPNEST_OIDC_ISSUER_URL", issuerURL},
-		{"GREPNEST_OIDC_CLIENT_ID", clientID},
-		{"GREPNEST_OIDC_CLIENT_SECRET_FILE", clientSecretFile},
-		{"GREPNEST_OIDC_LINK_CLAIM", os.Getenv("GREPNEST_OIDC_LINK_CLAIM")},
-	} {
-		if setting.value == "" {
-			return SSO{}, invalid(setting.name + " is required for OIDC")
+	if oidcEnabled {
+		for _, setting := range []struct{ name, value string }{
+			{"GREPNEST_OIDC_ISSUER_URL", issuerURL},
+			{"GREPNEST_OIDC_CLIENT_ID", clientID},
+			{"GREPNEST_OIDC_CLIENT_SECRET_FILE", clientSecretFile},
+			{"GREPNEST_OIDC_LINK_CLAIM", os.Getenv("GREPNEST_OIDC_LINK_CLAIM")},
+		} {
+			if setting.value == "" {
+				return SSO{}, invalid(setting.name + " is required for OIDC")
+			}
+		}
+		info, err := os.Stat(clientSecretFile)
+		if err != nil || !info.Mode().IsRegular() {
+			return SSO{}, invalid("GREPNEST_OIDC_CLIENT_SECRET_FILE must be a regular file")
 		}
 	}
-	info, err := os.Stat(clientSecretFile)
-	if err != nil || !info.Mode().IsRegular() {
-		return SSO{}, invalid("GREPNEST_OIDC_CLIENT_SECRET_FILE must be a regular file")
+	if githubEnabled {
+		for _, setting := range []struct{ name, value string }{
+			{"GREPNEST_OAUTH_GITHUB_CLIENT_ID", githubClientID},
+			{"GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE", githubClientSecretFile},
+		} {
+			if setting.value == "" {
+				return SSO{}, invalid(setting.name + " is required for GitHub OAuth")
+			}
+		}
+		info, err := os.Stat(githubClientSecretFile)
+		if err != nil || !info.Mode().IsRegular() {
+			return SSO{}, invalid("GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE must be a regular file")
+		}
 	}
 	if sso.PublicURL, err = parseHTTPSOrigin("GREPNEST_PUBLIC_URL", os.Getenv("GREPNEST_PUBLIC_URL")); err != nil {
 		return SSO{}, err
 	}
-	issuer, err := url.ParseRequestURI(issuerURL)
-	if err != nil || issuer.Scheme != "https" || issuer.Hostname() == "" || issuer.User != nil || issuer.ForceQuery || issuer.RawQuery != "" || issuer.Fragment != "" {
-		return SSO{}, invalid("GREPNEST_OIDC_ISSUER_URL must be an HTTPS URL without userinfo, query, or fragment")
+	if oidcEnabled {
+		issuer, err := url.ParseRequestURI(issuerURL)
+		if err != nil || issuer.Scheme != "https" || issuer.Hostname() == "" || issuer.User != nil || issuer.ForceQuery || issuer.RawQuery != "" || issuer.Fragment != "" {
+			return SSO{}, invalid("GREPNEST_OIDC_ISSUER_URL must be an HTTPS URL without userinfo, query, or fragment")
+		}
+		scopes, err := parseScopes(valueOr("GREPNEST_OIDC_SCOPES", "openid,profile,email"))
+		if err != nil {
+			return SSO{}, err
+		}
+		sso.OIDC = OIDC{
+			Enabled:          true,
+			IssuerURL:        issuerURL,
+			ClientID:         clientID,
+			ClientSecretFile: clientSecretFile,
+			CAFile:           os.Getenv("GREPNEST_OIDC_CA_FILE"),
+			Scopes:           scopes,
+			LinkClaim:        os.Getenv("GREPNEST_OIDC_LINK_CLAIM"),
+			DisplayNameClaim: valueOr("GREPNEST_OIDC_DISPLAY_NAME_CLAIM", "name"),
+		}
 	}
-	scopes, err := parseScopes(valueOr("GREPNEST_OIDC_SCOPES", "openid,profile,email"))
-	if err != nil {
-		return SSO{}, err
-	}
-	sso.OIDC = OIDC{
-		Enabled:          true,
-		IssuerURL:        issuerURL,
-		ClientID:         clientID,
-		ClientSecretFile: clientSecretFile,
-		CAFile:           os.Getenv("GREPNEST_OIDC_CA_FILE"),
-		Scopes:           scopes,
-		LinkClaim:        os.Getenv("GREPNEST_OIDC_LINK_CLAIM"),
-		DisplayNameClaim: valueOr("GREPNEST_OIDC_DISPLAY_NAME_CLAIM", "name"),
+	if githubEnabled {
+		sso.OAuth.GitHub = GitHubOAuth{
+			Enabled:          true,
+			ClientID:         githubClientID,
+			ClientSecretFile: githubClientSecretFile,
+		}
 	}
 	switch os.Getenv("GREPNEST_BREAK_GLASS_ENABLED") {
 	case "", "false":
