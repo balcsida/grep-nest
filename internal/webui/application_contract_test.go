@@ -41,7 +41,7 @@ func TestConsoleRendersTrustedProviderMetadataGenerically(t *testing.T) {
 		t.Fatal(err)
 	}
 	harness := `
-const links=[],host={replaceChildren(fragment){links.push(...fragment.children)}},document={
+const links=[],host={replaceChildren(){links.length=0},append(link){links.push(link)}},document={
   createDocumentFragment(){return {children:[],append(link){this.children.push(link)}}},
   createElement(){return {}},
 },$=()=>host,location={origin:"https://grepnest.example"};
@@ -52,6 +52,9 @@ providers([
   {label:"External",login_url:"https://evil.example/login"},
   {label:"Protocol relative",login_url:"//evil.example/login"},
   {label:"Backslash external",login_url:"/\\evil.example/login"},
+  null,
+  {label:"Missing URL"},
+  {label:"Numeric URL",login_url:7},
 ]);
 if(JSON.stringify(links.map(link=>[link.textContent,link.href]))!==JSON.stringify([
   ["Corporate identity","/auth/oidc/login"],["Code host","/auth/oauth/github/login"]
