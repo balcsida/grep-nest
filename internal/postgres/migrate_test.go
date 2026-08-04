@@ -95,7 +95,7 @@ func TestMigrateIsConcurrentAndIdempotent(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `select count(*) from schema_migrations`).Scan(&count); err != nil || count != 16 {
 		t.Fatalf("migrations=%d err=%v", count, err)
 	}
-	for _, test := range []struct {
+	for index, test := range []struct {
 		table, provider string
 		valid           bool
 	}{
@@ -105,9 +105,9 @@ func TestMigrateIsConcurrentAndIdempotent(t *testing.T) {
 		t.Run(test.table+"/"+test.provider, func(t *testing.T) {
 			var err error
 			if test.table == "auth_login_flows" {
-				_, err = pool.Exec(t.Context(), `insert into auth_login_flows (state_hash,browser_hash,provider,nonce,code_verifier,return_to,created_at,expires_at) values (digest($1,'sha256'),digest($2,'sha256'),$3,'nonce','verifier','/',now(),now()+interval '1 minute')`, test.table+test.provider, test.provider+test.table, test.provider)
+				_, err = pool.Exec(t.Context(), `insert into auth_login_flows (state_hash,browser_hash,provider,nonce,code_verifier,return_to,created_at,expires_at) values ($1,$2,$3,'nonce','verifier','/',now(),now()+interval '1 minute')`, bytes32(byte(index+1)), bytes32(byte(index+11)), test.provider)
 			} else {
-				_, err = pool.Exec(t.Context(), `with user_record as (insert into users (external_id,user_name,source) values ($1,$1,'scim') returning id) insert into auth_sessions (token_hash,user_id,provider,created_at,last_seen_at,idle_expires_at,expires_at) values (digest($1,'sha256'),(select id from user_record),$2,now(),now(),now()+interval '1 minute',now()+interval '1 hour')`, test.table+test.provider, test.provider)
+				_, err = pool.Exec(t.Context(), `with user_record as (insert into users (external_id,user_name,source) values ($1,$1,'scim') returning id) insert into auth_sessions (token_hash,user_id,provider,created_at,last_seen_at,idle_expires_at,expires_at) values ($2,(select id from user_record),$3,now(),now(),now()+interval '1 minute',now()+interval '1 hour')`, test.table+test.provider, bytes32(byte(index+1)), test.provider)
 			}
 			if test.valid && err != nil {
 				t.Fatal(err)
