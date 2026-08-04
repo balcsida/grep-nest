@@ -53,8 +53,8 @@ func TestGitHubOAuthCrossReplicaPreservesCredentialBoundaries(t *testing.T) {
 	assertGitHubOAuthConfig(t, oidcBrowser, public.URL)
 
 	oidcLogin := startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oidc/login", "A")
-	startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oauth/github/login", "A")
-	loginCookie(t, oidcJar, public.URL, "__Host-grepnest_oauth_github_login")
+	githubLogin := startBrowserLogin(t, oidcBrowser, public.URL+"/auth/oauth/github/login", "A")
+	githubCookie := loginCookie(t, oidcJar, public.URL, "__Host-grepnest_oauth_github_login")
 	assertBrowserCallbackFails(t, database, oidcBrowser, public.URL+"/auth/oauth/github/callback", oidcLogin.state, "B", public.URL)
 	completeOIDCLogin(t, oidcBrowser, oidcLogin.authorize, "B")
 	assertOIDCRepositoryStatus(t, oidcBrowser, public.URL, "B", http.StatusOK)
@@ -66,10 +66,9 @@ func TestGitHubOAuthCrossReplicaPreservesCredentialBoundaries(t *testing.T) {
 	githubBrowser := public.Client()
 	githubBrowser.Jar = githubJar
 	githubBrowser.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	githubJar.SetCookies(mustURL(t, public.URL), []*http.Cookie{githubCookie})
 	assertNoCookie(t, githubJar, public.URL, authn.SessionCookieName)
 
-	githubLogin := startBrowserLogin(t, githubBrowser, public.URL+"/auth/oauth/github/login", "A")
-	githubCookie := loginCookie(t, githubJar, public.URL, "__Host-grepnest_oauth_github_login")
 	assertGitHubOAuthFlowPersistence(t, database, githubLogin.state, githubCookie)
 	startBrowserLogin(t, githubBrowser, public.URL+"/auth/oidc/login", "A")
 	loginCookie(t, githubJar, public.URL, "__Host-grepnest_oidc_login")
@@ -226,7 +225,7 @@ func seedGitHubOAuthAuthorization(t *testing.T, database milestoneDatabase, link
 		t.Fatal(err)
 	}
 	var userID int64
-	if err := database.pool.QueryRow(t.Context(), `insert into users (external_id,user_name,source) values ($1,'ada','scim') returning id`, linkID).Scan(&userID); err != nil {
+	if err := database.pool.QueryRow(t.Context(), `insert into users (external_id,user_name,source) values ($1,'github-ada','scim') returning id`, linkID).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.pool.Exec(t.Context(), `insert into user_repository_grants (user_id,repository_id) values ($1,101)`, userID); err != nil {
