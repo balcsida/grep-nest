@@ -1,4 +1,4 @@
-package oidc
+package githuboauth
 
 import (
 	"time"
@@ -9,16 +9,14 @@ import (
 	"github.com/grepnest/grepnest/internal/sso/browserflow"
 )
 
-const OIDCLoginCookieName = sso.OIDCLoginCookieName
-
 func NewProvider(client browserflow.Client, store authn.SessionStore, sessions *authn.SessionManager, recorder audit.Recorder, loginTTL time.Duration) *browserflow.Provider {
 	return &browserflow.Provider{
 		Spec: browserflow.Spec{
-			Metadata:  sso.Metadata{ID: "oidc", Label: "Sign in with SSO", LoginURL: "/auth/oidc/login"},
-			LoginPath: "/auth/oidc/login", CallbackPath: "/auth/oidc/callback",
-			FlowProvider: authn.ProviderOIDC, IdentityProvider: authn.ProviderOIDC,
-			CookieName: sso.OIDCLoginCookieName, Method: authn.ProviderOIDC,
-			SuccessOperation: audit.OperationOIDCLoginSucceeded, DeniedOperation: audit.OperationOIDCLoginDenied,
+			Metadata:  sso.Metadata{ID: "github", Label: "Sign in with GitHub", LoginURL: "/auth/oauth/github/login"},
+			LoginPath: "/auth/oauth/github/login", CallbackPath: "/auth/oauth/github/callback",
+			FlowProvider: "github", IdentityProvider: authn.ProviderOAuth,
+			CookieName: "__Host-grepnest_oauth_github_login", Method: authn.ProviderOAuth,
+			SuccessOperation: audit.OperationOAuthLoginSucceeded, DeniedOperation: audit.OperationOAuthLoginDenied,
 		},
 		Client: client, Store: store, Sessions: sessions, Audit: recorder, LoginTTL: loginTTL,
 	}

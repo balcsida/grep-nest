@@ -17,6 +17,16 @@ func TestEventRejectsUnapprovedOperation(t *testing.T) {
 	}
 }
 
+func TestEventAcceptsOAuthAuthentication(t *testing.T) {
+	event := Event{
+		ActorType: "anonymous", TargetType: "authentication",
+		AuthenticationMethod: "oauth", Operation: OperationOAuthLoginDenied, Outcome: "denied",
+	}
+	if err := event.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequestIDContextRejectsUnboundedValues(t *testing.T) {
 	ctx := WithRequestID(t.Context(), "request-1")
 	if got := RequestID(ctx); got != "request-1" {

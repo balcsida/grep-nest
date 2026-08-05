@@ -220,8 +220,7 @@ func (c *Client) doJSON(ctx context.Context, operation, method string, endpoint 
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Accept", githubMediaType)
-	request.Header.Set("X-GitHub-Api-Version", c.apiVersion)
+	SetAPIHeaders(request.Header, c.apiVersion)
 	request.Header.Set("Authorization", authorization)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -255,7 +254,12 @@ func (c *Client) doJSON(ctx context.Context, operation, method string, endpoint 
 }
 
 func (c *Client) apiURL(segments ...string) *url.URL {
-	endpoint := *c.endpoints.API
+	endpoint, _ := url.Parse(EndpointURL(c.endpoints.API, segments...))
+	return endpoint
+}
+
+func EndpointURL(base *url.URL, segments ...string) string {
+	endpoint := *base
 	rawPath := strings.TrimSuffix(endpoint.EscapedPath(), "/")
 	for _, segment := range segments {
 		rawPath += "/" + url.PathEscape(segment)
@@ -263,7 +267,13 @@ func (c *Client) apiURL(segments ...string) *url.URL {
 	path, _ := url.PathUnescape(rawPath)
 	endpoint.Path, endpoint.RawPath = path, rawPath
 	endpoint.RawQuery, endpoint.Fragment = "", ""
-	return &endpoint
+	return endpoint.String()
+}
+
+func SetAPIHeaders(header http.Header, apiVersion string) {
+	header.Set("Accept", githubMediaType)
+	header.Set("User-Agent", "GrepNest")
+	header.Set("X-GitHub-Api-Version", apiVersion)
 }
 
 func (c *Client) nextPage(link string) (*url.URL, error) {

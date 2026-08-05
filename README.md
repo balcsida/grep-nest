@@ -30,7 +30,7 @@ Under the hood, GrepNest combines fast [Zoekt](https://github.com/sourcegraph/zo
 | **Relationship-aware graph analysis** | Explore context, impact, and dependency paths through a derived LadybugDB graph. Administrators can also run bounded, read-only Cypher queries. |
 | **Human and agent interfaces** | Use the embedded browser console, REST API, hosted Streamable HTTP MCP endpoint, or the `grepnest-mcp` stdio proxy. |
 | **GitHub-native repository management** | Reconcile GitHub App installations, verify webhook signatures, queue default-branch indexing, support private CAs, and retain numeric GitHub repository identity across renames. |
-| **Durable identity and access** | Use OIDC browser sign-in, SCIM 2.0 provisioning, revocable API tokens, user and group repository assignments, administrative controls, and security audit events. |
+| **Durable identity and access** | Use OIDC or GitHub OAuth browser sign-in, SCIM 2.0 provisioning, revocable API tokens, user and group repository assignments, administrative controls, and security audit events. |
 | **Pilot deployment tooling** | Run locally with Docker Compose or deploy the single-node pilot with Helm. Releases publish multi-architecture images, an OCI chart, SBOMs, provenance, and GitHub attestations. |
 
 Native graph scanners currently support **Go, JavaScript, TypeScript/TSX, Java, Kotlin, and Rust**. SCIP uploads remain a separate, language-indexer-independent navigation path.
@@ -63,11 +63,13 @@ PostgreSQL is authoritative for repository metadata, authorization, queues, inde
 
 | Interface | Location | Authentication |
 | --- | --- | --- |
-| Browser console | `/` | Development bearer token or durable OIDC session |
+| Browser console | `/` | Development bearer token or durable OIDC or GitHub OAuth session |
 | REST API | `/v1/...` | Bearer token or, where supported, same-origin browser session |
 | Streamable HTTP MCP | `/mcp` | Bearer token |
 | Stdio MCP proxy | `grepnest-mcp` | Uses `GREPNEST_SERVER_URL` and `GREPNEST_TOKEN` |
 | Health and observability | `/healthz`, `/readyz`, `/metrics` | Intended for deployment health checks and monitoring |
+
+REST routes accept exactly one bearer credential or browser session; mixed credentials are rejected. MCP remains bearer-only.
 
 The complete REST contract is available in [`docs/openapi.yaml`](docs/openapi.yaml).
 
@@ -215,14 +217,16 @@ Replace `graph-embedded.yml` with `graph-separate.yml` to run a standalone graph
 | Purpose | Mechanism |
 | --- | --- |
 | Local fixture access | Distinct development-only user and administrator bearer tokens |
-| Browser sign-in | OIDC Authorization Code flow with PKCE and an opaque, HttpOnly GrepNest session |
+| Browser sign-in | OIDC or GitHub OAuth Authorization Code flow with PKCE and an opaque, HttpOnly GrepNest session |
 | REST and MCP access | Revocable bearer API tokens; `/mcp` remains bearer-only |
 | Directory provisioning | Optional SCIM 2.0 endpoint protected by a dedicated secret-file token |
 | Emergency administration | Disabled-by-default local recovery flow provisioned offline with `grepnest-admin` |
 
 Authorization is enforced by the server against current repository IDs and directory state. Repository names are selectors, not security identities. Deactivated users and revoked credentials are denied on their next request.
 
-OIDC, SCIM, API-token administration, audit events, and break-glass recovery require durable mode. See [Operations](docs/operations.md) and the [Threat model](docs/threat-model.md) before exposing the service.
+GitHub OAuth uses a dedicated OAuth App per environment, separate from the GitHub App used for repository access. Configure `GREPNEST_PUBLIC_URL`, `GREPNEST_OAUTH_GITHUB_CLIENT_ID`, and `GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE`, then register `https://<public-host>/auth/oauth/github/callback`. The flow requests no scope and uses the access token once for `GET /user`; the token is then discarded and cannot authenticate MCP. GitHub Enterprise Server OAuth remains unverified.
+
+OIDC, GitHub OAuth, SCIM, API-token administration, audit events, and break-glass recovery require durable mode. See [Operations](docs/operations.md) and the [Threat model](docs/threat-model.md) before exposing the service.
 
 ## Kubernetes and Helm
 
@@ -240,7 +244,7 @@ helm upgrade --install grepnest grepnest-0.2.0.tgz \
   --timeout 15m
 ```
 
-Review the [Helm chart documentation](deploy/helm/grepnest/README.md) for required images, Secrets, storage, ingress, network policies, OIDC, SCIM, scanners, graph topology, monitoring, and recovery procedures. Release notes contain immutable artifact references and attestation-verification commands.
+Review the [Helm chart documentation](deploy/helm/grepnest/README.md) for required images, Secrets, storage, ingress, network policies, OIDC, GitHub OAuth, SCIM, scanners, graph topology, monitoring, and recovery procedures. Release notes contain immutable artifact references and attestation-verification commands.
 
 ## Current limits
 

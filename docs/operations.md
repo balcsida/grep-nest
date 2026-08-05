@@ -258,7 +258,7 @@ administrator, or rotates that same eligible account, forces password
 rotation, revokes its sessions and API tokens, and records
 `break_glass_password_set`.
 
-Creating the credential does not expose local login. An OIDC outage never
+Creating the credential does not expose local login. An external-provider outage never
 enables it automatically. Set `GREPNEST_BREAK_GLASS_ENABLED=true` (Compose) or
 `breakGlass.enabled=true` (Helm) only for the recovery window, apply the
 configuration, and wait for every replica to restart. All replicas must share
@@ -267,8 +267,9 @@ sign-in must use `/auth/local/rotate`; it replaces the operator password,
 clears forced rotation, revokes older sessions and API tokens, and issues a
 new session.
 
-After SSO is restored, first verify an OIDC sign-in. If the recovery account
-must remain, rerun `grepnest-admin` to replace its password and revoke its
+After external sign-in is restored, first verify OIDC or GitHub OAuth sign-in.
+If the recovery account must remain, rerun `grepnest-admin` to replace its
+password and revoke its
 credentials; otherwise suspend it through identity administration and revoke
 its credentials. Set the Compose switch to `false` or Helm
 `breakGlass.enabled=false`, apply the configuration, and verify
@@ -291,6 +292,64 @@ endpoints. The callback is `/auth/oidc/callback`; `GREPNEST_PUBLIC_URL` is the
 authoritative HTTPS origin. Browser clients send same-origin credentials. Unsafe
 session requests require that exact Origin, and GrepNest persists no refresh
 tokens.
+
+## Optional GitHub OAuth operations
+
+GitHub OAuth requires durable PostgreSQL, an HTTPS `GREPNEST_PUBLIC_URL`, and
+both `GREPNEST_OAUTH_GITHUB_CLIENT_ID` and
+`GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE`. The secret must be a non-empty
+regular file mounted read-only; there is no plaintext secret variable. Both
+absent disables this provider and either one alone is a startup error. Use a
+dedicated GitHub OAuth App for each environment and register exactly
+`<GREPNEST_PUBLIC_URL>/auth/oauth/github/callback` as its callback URL. GitHub
+OAuth may run alone or beside OIDC; the combined browser list puts OIDC first.
+With neither browser provider, browser sign-in is unavailable but bearer REST
+and MCP credentials remain supported. Local break-glass requires either
+external provider, never enables automatically, and recovery must verify an
+external login before closure.
+
+OAuth derives its authorization/token endpoints from `GREPNEST_GITHUB_WEB_URL`
+and its user endpoint from `GREPNEST_GITHUB_API_URL`; it reuses their existing
+GitHub egress, `GREPNEST_GITHUB_CA_FILE`, timeout, and redirect policy. Do not
+add OAuth-specific endpoint, CA, or network-policy controls. GitHub Enterprise
+Server OAuth is explicitly unverified. This OAuth App is only browser identity:
+the separate GitHub App remains the repository credential. The request sends
+no scope; granted scope is rejected. The access token is used only once for
+the authenticated-user request, then is neither persisted nor refreshed.
+
+Replace the mounted client-secret file and restart every server replica to
+rotate it or revoke a compromised client; configuration and secrets are read at
+process startup. Revoke the OAuth App credential at GitHub as appropriate, then
+complete the restart. MCP has no browser OAuth mode and rejects session cookies;
+use a bearer token for `/mcp`.
+
+### GitHub.com smoke and negative procedure
+
+1. Use a public HTTPS origin and create a dedicated GitHub.com OAuth App for
+   that environment. Set its homepage to the public origin and its callback to
+   `<GREPNEST_PUBLIC_URL>/auth/oauth/github/callback`.
+2. Place the OAuth client secret in a read-only regular file. Configure
+   `GREPNEST_DATABASE_URL`, `GREPNEST_PUBLIC_URL=https://<public-host>`,
+   `GREPNEST_OAUTH_GITHUB_CLIENT_ID`, and
+   `GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE`; retain the existing GitHub web,
+   API, egress, and CA configuration. Restart every server replica.
+3. Obtain the test account's numeric ID without using its mutable login name:
+   `curl --fail-with-body https://api.github.com/user -H "Authorization: Bearer $GITHUB_TOKEN" | jq .id`.
+   Provision an active SCIM user with `externalId` exactly
+   `github:https://github.com:<numeric-id>`, then grant it access to a known
+   repository.
+4. `curl --fail-with-body https://<public-host>/v1/auth/config` must list the
+   GitHub provider; with OIDC also enabled, it must follow OIDC. In a new
+   browser session, choose **Sign in with GitHub**, complete GitHub.com login,
+   and confirm `GET /v1/auth/session` returns `{"method":"oauth"}`. Search
+   and read an authorized repository, then `POST /auth/logout` and confirm the
+   session no longer authenticates requests.
+5. Repeat the browser flow with an unprovisioned user, an inactive SCIM user,
+   and a user with a wrong `externalId`; each must be denied. Cancel consent to
+   confirm denial is safe, replay the callback URL to confirm rejection, send a
+   browser session cookie to `/mcp` without bearer credentials to confirm 401,
+   and, when enabled, complete an OIDC login as well to confirm simultaneous
+   providers remain distinct.
 
 ## Optional SCIM operations
 

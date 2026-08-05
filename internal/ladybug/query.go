@@ -163,11 +163,14 @@ func executeQuery(connection *lbug.Connection, query string, parameters map[stri
 		Columns: append([]string(nil), queryResult.GetColumnNames()...),
 		Rows:    make([][]any, 0),
 	}
-	if encoded, encodeErr := json.Marshal(result); encodeErr != nil {
+	encoded, encodeErr := json.Marshal(result)
+	if encodeErr != nil {
 		return Result{}, encodeErr
-	} else if len(encoded) > limits.MaxBytes {
+	}
+	if len(encoded) > limits.MaxBytes {
 		return Result{}, fmt.Errorf("query result metadata exceeds %d-byte limit", limits.MaxBytes)
 	}
+	encodedBytes := len(encoded)
 	for queryResult.HasNext() {
 		if len(result.Rows) == limits.MaxRows {
 			result.Truncated = true
@@ -182,17 +185,20 @@ func executeQuery(connection *lbug.Connection, query string, parameters map[stri
 		if rowErr != nil {
 			return Result{}, rowErr
 		}
-		candidate := result
-		candidate.Rows = append(result.Rows, row)
-		encoded, encodeErr := json.Marshal(candidate)
+		encodedRow, encodeErr := json.Marshal(row)
 		if encodeErr != nil {
 			return Result{}, encodeErr
 		}
-		if len(encoded) > limits.MaxBytes {
+		candidateBytes := encodedBytes + len(encodedRow)
+		if len(result.Rows) > 0 {
+			candidateBytes++
+		}
+		if candidateBytes > limits.MaxBytes {
 			result.Truncated = true
 			break
 		}
-		result = candidate
+		result.Rows = append(result.Rows, row)
+		encodedBytes = candidateBytes
 	}
 	return result, nil
 }

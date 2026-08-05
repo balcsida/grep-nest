@@ -14,14 +14,25 @@ those repositories to Zoekt `RepoIDs`, applies bounded search limits, and
 normalizes the response. A request that selects no authorized repositories
 returns no matches without calling Zoekt.
 
-When enabled, OIDC verifies the Authorization Code + PKCE callback then stores
-only a hashed opaque GrepNest session. Same-origin browser REST requests use
-the HttpOnly session cookie; no IdP refresh token is persisted and `/mcp`
-remains bearer-only.
+Browser sign-in may enable OIDC, GitHub OAuth, or both; the provider list is
+deterministically OIDC then GitHub. Both use the same Authorization Code + PKCE
+flow and store only a hashed opaque GrepNest session. Same-origin browser REST
+requests use the HttpOnly session cookie. GitHub OAuth's metadata/flow provider
+is `github`, but its identity and session method is `oauth`; its routes are
+`/auth/oauth/github/login` and `/auth/oauth/github/callback`.
+
+GitHub OAuth canonicalizes the HTTPS GitHub web origin as issuer and uses the
+positive numeric GitHub user ID as subject. It links an active SCIM user only
+when `externalId` exactly equals `github:https://github.com:<numeric-id>` on
+GitHub.com. This immutable identity survives login or display-name changes.
+The access token is used once for the authenticated-user request, never stored
+or refreshed; the authorization request sends no scope and rejects a granted
+scope. `/mcp` remains bearer-only and rejects browser-session cookies.
 
 When enabled, `/scim/v2` uses a separate secret-file bearer credential and
-writes the same PostgreSQL users, groups, and memberships used by OIDC and
-authorization. OIDC binds its configured link claim to SCIM `externalId`.
+writes the same PostgreSQL users, groups, and memberships used by browser
+providers and authorization. OIDC binds its configured link claim to SCIM
+`externalId`; GitHub OAuth uses its canonical `github:<issuer>:<subject>` link.
 Sessions and API tokens resolve live directory state on every request, so SCIM
 deactivation or deletion takes effect immediately.
 
@@ -38,7 +49,9 @@ enforces the principal's repository scope.
 
 Beginning in Milestone 2, PostgreSQL supplies repository metadata and the
 durable index queue. `grepnest-server` verifies GitHub webhooks and reconciles
-GitHub App installations. `grepnest-indexer` leases one job at a time, fetches
+GitHub App installations. That GitHub App is separate from user OAuth and is
+the only credential used for repository work. `grepnest-indexer` leases one
+job at a time, fetches
 only its default branch, and publishes the indexed SHA after Zoekt confirms
 visibility through `/api/list`. Search suppresses a result when Zoekt's branch
 version differs from PostgreSQL's committed indexed SHA. Runtime bearer scopes

@@ -71,6 +71,8 @@ render_files() {
     GREPNEST_OIDC_SCOPES= \
     GREPNEST_OIDC_LINK_CLAIM= \
     GREPNEST_OIDC_DISPLAY_NAME_CLAIM= \
+    GREPNEST_OAUTH_GITHUB_CLIENT_ID= \
+    GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE= \
     GREPNEST_SCIM_TOKEN_FILE= \
     GREPNEST_BREAK_GLASS_ENABLED= \
     GREPNEST_GITHUB_PRIVATE_KEY_FILE=/tmp/private-key.pem \
@@ -174,6 +176,8 @@ config=$(render \
   GREPNEST_OIDC_SCOPES=openid,profile,email \
   GREPNEST_OIDC_LINK_CLAIM=sub \
   GREPNEST_OIDC_DISPLAY_NAME_CLAIM=name \
+  GREPNEST_OAUTH_GITHUB_CLIENT_ID=grepnest-github \
+  GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE=/tmp/oauth-github-client-secret \
   GREPNEST_SCIM_TOKEN_FILE=/tmp/scim-token)
 
 printf '%s' "$config" | jq -e '
@@ -187,7 +191,7 @@ printf '%s' "$config" | jq -e '
   and ($server.environment | keys | sort) == [
     "GREPNEST_BREAK_GLASS_ENABLED", "GREPNEST_DATABASE_URL", "GREPNEST_GITHUB_API_URL", "GREPNEST_GITHUB_APP_ID",
     "GREPNEST_GITHUB_CA_FILE", "GREPNEST_GITHUB_GIT_URL", "GREPNEST_GITHUB_PRIVATE_KEY_FILE", "GREPNEST_GITHUB_UPLOAD_URL",
-    "GREPNEST_GITHUB_WEBHOOK_SECRET_FILE", "GREPNEST_GITHUB_WEB_URL", "GREPNEST_OIDC_CA_FILE", "GREPNEST_OIDC_CLIENT_ID", "GREPNEST_OIDC_CLIENT_SECRET_FILE", "GREPNEST_OIDC_DISPLAY_NAME_CLAIM", "GREPNEST_OIDC_ISSUER_URL", "GREPNEST_OIDC_LINK_CLAIM", "GREPNEST_OIDC_SCOPES", "GREPNEST_PUBLIC_URL", "GREPNEST_SCIM_TOKEN_FILE", "GREPNEST_SCIP_MAX_UPLOAD_BYTES", "GREPNEST_SSO_LOGIN_FLOW_TTL", "GREPNEST_SSO_SESSION_IDLE", "GREPNEST_SSO_SESSION_TTL",
+    "GREPNEST_GITHUB_WEBHOOK_SECRET_FILE", "GREPNEST_GITHUB_WEB_URL", "GREPNEST_OAUTH_GITHUB_CLIENT_ID", "GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE", "GREPNEST_OIDC_CA_FILE", "GREPNEST_OIDC_CLIENT_ID", "GREPNEST_OIDC_CLIENT_SECRET_FILE", "GREPNEST_OIDC_DISPLAY_NAME_CLAIM", "GREPNEST_OIDC_ISSUER_URL", "GREPNEST_OIDC_LINK_CLAIM", "GREPNEST_OIDC_SCOPES", "GREPNEST_PUBLIC_URL", "GREPNEST_SCIM_TOKEN_FILE", "GREPNEST_SCIP_MAX_UPLOAD_BYTES", "GREPNEST_SSO_LOGIN_FLOW_TTL", "GREPNEST_SSO_SESSION_IDLE", "GREPNEST_SSO_SESSION_TTL",
     "GREPNEST_ZOEKT_URL"
   ]
   and ($server.ports | any(.host_ip == "127.0.0.1" and .target == 8080 and .published == "8080"))
@@ -200,6 +204,9 @@ printf '%s' "$config" | jq -e '
   and $server.environment.GREPNEST_OIDC_CA_FILE == "/run/secrets/grepnest/oidc-ca.pem"
   and ($server.volumes | any(.source == "/tmp/oidc-client-secret" and .target == "/run/secrets/grepnest/oidc-client-secret" and .read_only))
   and ($server.volumes | any(.source == "/tmp/oidc-ca.pem" and .target == "/run/secrets/grepnest/oidc-ca.pem" and .read_only))
+  and $server.environment.GREPNEST_OAUTH_GITHUB_CLIENT_ID == "grepnest-github"
+  and $server.environment.GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE == "/run/secrets/grepnest/oauth-github-client-secret"
+  and ($server.volumes | any(.source == "/tmp/oauth-github-client-secret" and .target == "/run/secrets/grepnest/oauth-github-client-secret" and .read_only))
   and $server.environment.GREPNEST_SCIM_TOKEN_FILE == "/run/secrets/grepnest/scim/token"
   and $server.environment.GREPNEST_BREAK_GLASS_ENABLED == "false"
   and ($server.volumes | any(.source == "/tmp/scim-token" and .target == "/run/secrets/grepnest/scim/token" and .read_only))
@@ -223,8 +230,11 @@ printf '%s' "${without_ca:?missing Compose config without private CA}" |
     .services["grepnest-server"] as $server
     | $server.image == "registry.example/grepnest/application:test"
     and $server.environment.GREPNEST_GITHUB_CA_FILE == ""
+    and $server.environment.GREPNEST_OAUTH_GITHUB_CLIENT_ID == ""
+    and $server.environment.GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE == ""
     and $server.environment.GREPNEST_SCIM_TOKEN_FILE == ""
     and ($server.volumes | any(.source == "/dev/null" and .target == "/run/secrets/grepnest/github-ca.pem" and .read_only and (.bind.create_host_path // false) == false))
+    and ($server.volumes | any(.source == "/dev/null" and .target == "/run/secrets/grepnest/oauth-github-client-secret" and .read_only and (.bind.create_host_path // false) == false))
   ' >/dev/null
 
 if render >/dev/null 2>&1; then

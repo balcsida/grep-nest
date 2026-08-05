@@ -16,6 +16,7 @@ monitoring:
 secrets:
   customCA: {name: grepnest-existing-ca, key: ca.crt}
   oidc: {name: grepnest-oidc, clientSecretKey: client-secret}
+  githubOAuth: {name: grepnest-github-oauth, clientSecretKey: client-secret}
   oidcCA: {name: grepnest-oidc-ca, key: ca.crt}
   scim: {name: grepnest-scim, tokenKey: token}
 server:
@@ -23,6 +24,7 @@ server:
   sso:
     publicURL: https://grepnest.example.invalid
     oidc: {enabled: true, issuerURL: https://id.example.invalid, clientID: grepnest, scopes: [openid, profile, email], linkClaim: sub, displayNameClaim: name}
+    githubOAuth: {enabled: true, clientID: grepnest-github}
   nodeSelector: {grepnest.example.invalid/pool: server}
   affinity:
     nodeAffinity:

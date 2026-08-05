@@ -58,6 +58,7 @@
         "githubApp",
         "customCA",
         "oidc",
+        "githubOAuth",
         "oidcCA",
         "scim"
       ],
@@ -72,6 +73,9 @@
           "$ref": "#/definitions/optionalSecret"
         },
         "oidc": {
+          "$ref": "#/definitions/oidcSecret"
+        },
+        "githubOAuth": {
           "$ref": "#/definitions/oidcSecret"
         },
         "oidcCA": {
@@ -208,7 +212,7 @@
         "sso": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["publicURL", "sessionIdle", "sessionTTL", "loginFlowTTL", "oidc"],
+          "required": ["publicURL", "sessionIdle", "sessionTTL", "loginFlowTTL", "oidc", "githubOAuth"],
           "properties": {
             "publicURL": {"type": "string"},
             "sessionIdle": {"$ref": "#/definitions/duration"},
@@ -225,6 +229,15 @@
                 "scopes": {"type": "array", "minItems": 1, "uniqueItems": true, "contains": {"const": "openid"}, "items": {"$ref": "#/definitions/nonEmptyString"}},
                 "linkClaim": {"type": "string"},
                 "displayNameClaim": {"$ref": "#/definitions/nonEmptyString"}
+              }
+            },
+            "githubOAuth": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "clientID"],
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "clientID": {"type": "string"}
               }
             }
           }
@@ -697,7 +710,10 @@
   "allOf": [
     {
       "if": {"properties": {"breakGlass": {"properties": {"enabled": {"const": true}}}}},
-      "then": {"properties": {"server": {"properties": {"sso": {"properties": {"oidc": {"properties": {"enabled": {"const": true}}}}}}}}}
+      "then": {"anyOf": [
+        {"properties": {"server": {"properties": {"sso": {"properties": {"oidc": {"properties": {"enabled": {"const": true}}}}}}}}},
+        {"properties": {"server": {"properties": {"sso": {"properties": {"githubOAuth": {"properties": {"enabled": {"const": true}}}}}}}}}
+      ]}
     },
     {
       "if": {"properties": {"server": {"properties": {"scim": {"properties": {"enabled": {"const": true}}}}}}},
@@ -713,6 +729,16 @@
         "server": {"properties": {"sso": {"properties": {
           "publicURL": {"$ref": "#/definitions/httpsURL"},
           "oidc": {"properties": {"issuerURL": {"$ref": "#/definitions/httpsURL"}, "clientID": {"$ref": "#/definitions/nonEmptyString"}, "linkClaim": {"$ref": "#/definitions/nonEmptyString"}}}
+        }}}}
+      }}
+    },
+    {
+      "if": {"properties": {"server": {"properties": {"sso": {"properties": {"githubOAuth": {"properties": {"enabled": {"const": true}}}}}}}}},
+      "then": {"properties": {
+        "secrets": {"properties": {"githubOAuth": {"properties": {"name": {"$ref": "#/definitions/kubernetesObjectName"}}}}},
+        "server": {"properties": {"sso": {"properties": {
+          "publicURL": {"$ref": "#/definitions/httpsURL"},
+          "githubOAuth": {"properties": {"clientID": {"$ref": "#/definitions/nonEmptyString"}}}
         }}}}
       }}
     },

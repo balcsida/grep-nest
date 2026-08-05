@@ -6,7 +6,7 @@
 - bearer tokens and GitHub App installation credentials;
 - authorization scopes and server-selected Zoekt repository IDs;
 - service and index availability.
-- OIDC login transactions and browser sessions.
+- OIDC and GitHub OAuth login transactions and browser sessions.
 - the dedicated SCIM provisioning token and directory mutations.
 - local recovery credentials, shared login throttles, sessions, and immutable
   security audit events.
@@ -28,7 +28,8 @@ credentials, attempt throttles, and sessions, so limits and revocation apply
 across replicas. The sixth attempt in the fixed fifteen-minute window is
 blocked with a bounded `Retry-After`.
 
-Recovery ends by restoring and verifying OIDC, replacing or suspending the
+Recovery ends by restoring and verifying an external provider (OIDC or GitHub
+OAuth), replacing or suspending the
 local account and revoking its credentials, disabling the route, applying the
 deployment, and checking every replica. Configuration is loaded at process
 startup; partial rollouts can expose different route availability until all
@@ -48,6 +49,28 @@ replicas restart.
   not logged;
 - fixture indexing uses pinned binaries with argument arrays and never runs
   fixture repository code.
+
+## Browser OAuth controls
+
+- GitHub OAuth uses a dedicated per-environment OAuth App, separate from the
+  GitHub App repository credential; its callback is fixed at
+  `/auth/oauth/github/callback` under the HTTPS public origin;
+- state and browser binding are independent 32-byte random values stored only
+  as hashes; provider-bound, one-time flows reject expiry, replay, duplicate
+  callback values, and cross-provider confusion;
+- PKCE S256 binds authorization codes to the initiating browser; GitHub OAuth
+  asks for no scope and rejects every non-empty granted scope;
+- the canonical HTTPS issuer plus positive numeric GitHub subject form the
+  SCIM link `github:https://github.com:<numeric-id>`, avoiding mutable login
+  and rename binding; only active SCIM users may bind or retain access;
+- exchanged access tokens are held only in callback-local memory for one
+  bounded authenticated-user request, never logged, audited, returned,
+  persisted, refreshed, or supplied to the GitHub App;
+- OAuth uses the configured GitHub origins, existing custom CA, bounded
+  transport, and redirect policy, preventing cross-origin credential leakage;
+  GHES OAuth is unverified; and
+- REST rejects mixed bearer/session credentials, while MCP remains bearer-only
+  and rejects browser-session cookies.
 
 ## Milestone 2 controls
 

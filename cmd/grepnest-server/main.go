@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/grepnest/grepnest/internal/scipgraph"
 	"github.com/grepnest/grepnest/internal/search"
 	"github.com/grepnest/grepnest/internal/sso"
+	"github.com/grepnest/grepnest/internal/sso/githuboauth"
 	"github.com/grepnest/grepnest/internal/sso/oidc"
 	"github.com/grepnest/grepnest/internal/webhook"
 	"github.com/grepnest/grepnest/internal/webui"
@@ -41,15 +43,16 @@ import (
 )
 
 const (
-	searchNodeID             = "primary"
-	reconcileInterval        = 5 * time.Minute
-	maxPrivateKeyBytes       = 64 << 10
-	maxWebhookKeyBytes       = 64 << 10
-	maxCABytes               = 1 << 20
-	maxOIDCClientSecretBytes = 64 << 10
-	maxOIDCCABytes           = 1 << 20
-	maxSCIMTokenBytes        = 64 << 10
-	maxGitHubResponseBytes   = 2 << 20
+	searchNodeID              = "primary"
+	reconcileInterval         = 5 * time.Minute
+	maxPrivateKeyBytes        = 64 << 10
+	maxWebhookKeyBytes        = 64 << 10
+	maxCABytes                = 1 << 20
+	maxOIDCClientSecretBytes  = 64 << 10
+	maxGitHubOAuthSecretBytes = 64 << 10
+	maxOIDCCABytes            = 1 << 20
+	maxSCIMTokenBytes         = 64 << 10
+	maxGitHubResponseBytes    = 2 << 20
 )
 
 func main() { os.Exit(run()) }
@@ -164,37 +167,51 @@ type authRuntime struct {
 	providers   []sso.Provider
 }
 
-func newAuthRuntime(ctx context.Context, settings config.Config, store authn.SessionStore, bearer authn.Authenticator, metrics *observability.Metrics) (*authRuntime, error) {
+func newAuthRuntime(ctx context.Context, settings config.Config, store authn.SessionStore, bearer authn.Authenticator, metrics *observability.Metrics, endpoints githubapp.Endpoints, httpClient *http.Client) (*authRuntime, error) {
 	runtime := &authRuntime{requestAuth: authn.RequestAuthenticator{Bearer: bearer, Metrics: metrics}}
-	if !settings.SSO.OIDC.Enabled {
+	if !settings.SSO.OIDC.Enabled && !settings.SSO.OAuth.GitHub.Enabled {
 		return runtime, nil
 	}
-	secret, err := readBoundedRegularFile(settings.SSO.OIDC.ClientSecretFile, maxOIDCClientSecretBytes)
-	if err != nil {
-		return nil, fmt.Errorf("read OIDC client secret: %w", err)
-	}
-	var caPEM []byte
-	if settings.SSO.OIDC.CAFile != "" {
-		caPEM, err = readBoundedRegularFile(settings.SSO.OIDC.CAFile, maxOIDCCABytes)
-		if err != nil {
-			return nil, fmt.Errorf("read OIDC CA: %w", err)
-		}
-	}
-	client, err := oidc.New(ctx, settings.SSO.OIDC, settings.SSO.PublicURL, secret, caPEM)
-	if err != nil {
-		return nil, err
-	}
 	runtime.sessions = &authn.SessionManager{Store: store, IdleTTL: settings.SSO.SessionIdle, TTL: settings.SSO.SessionTTL}
-	if recorder, ok := store.(audit.Recorder); ok {
+	var recorder audit.Recorder
+	if candidate, ok := store.(audit.Recorder); ok {
+		recorder = candidate
 		runtime.sessions.Audit = recorder
 	}
 	runtime.requestAuth.Session = runtime.sessions
 	runtime.requestAuth.PublicOrigin = settings.SSO.PublicURL.Scheme + "://" + settings.SSO.PublicURL.Host
-	provider := &oidc.Provider{Client: client, Store: store, Sessions: runtime.sessions, LoginTTL: settings.SSO.LoginFlowTTL}
-	if recorder, ok := store.(audit.Recorder); ok {
-		provider.Audit = recorder
+	if settings.SSO.OIDC.Enabled {
+		secret, err := readBoundedRegularFile(settings.SSO.OIDC.ClientSecretFile, maxOIDCClientSecretBytes)
+		if err != nil {
+			return nil, fmt.Errorf("read OIDC client secret: %w", err)
+		}
+		var caPEM []byte
+		if settings.SSO.OIDC.CAFile != "" {
+			caPEM, err = readBoundedRegularFile(settings.SSO.OIDC.CAFile, maxOIDCCABytes)
+			if err != nil {
+				return nil, fmt.Errorf("read OIDC CA: %w", err)
+			}
+		}
+		client, err := oidc.New(ctx, settings.SSO.OIDC, settings.SSO.PublicURL, secret, caPEM)
+		if err != nil {
+			return nil, err
+		}
+		runtime.providers = append(runtime.providers, oidc.NewProvider(client, store, runtime.sessions, recorder, settings.SSO.LoginFlowTTL))
 	}
-	runtime.providers = []sso.Provider{provider}
+	if settings.SSO.OAuth.GitHub.Enabled {
+		secret, err := readBoundedRegularFile(settings.SSO.OAuth.GitHub.ClientSecretFile, maxGitHubOAuthSecretBytes)
+		if err != nil {
+			return nil, fmt.Errorf("read GitHub OAuth client secret: %w", err)
+		}
+		if len(strings.TrimSpace(string(secret))) == 0 {
+			return nil, errors.New("GitHub OAuth client secret is empty")
+		}
+		client, err := githuboauth.NewClient(endpoints, settings.SSO.PublicURL, settings.SSO.OAuth.GitHub.ClientID, secret, settings.GitHub.APIVersion, httpClient)
+		if err != nil {
+			return nil, err
+		}
+		runtime.providers = append(runtime.providers, githuboauth.NewProvider(client, store, runtime.sessions, recorder, settings.SSO.LoginFlowTTL))
+	}
 	return runtime, nil
 }
 
@@ -279,7 +296,7 @@ func newDurableRuntime(ctx context.Context, settings config.Config, logger *slog
 		return fail(err)
 	}
 	authenticator := durableAuthenticator(store)
-	auth, err := newAuthRuntime(loopCtx, settings, store, authenticator, metrics)
+	auth, err := newAuthRuntime(loopCtx, settings, store, authenticator, metrics, endpoints, httpClient)
 	if err != nil {
 		cancel()
 		<-done

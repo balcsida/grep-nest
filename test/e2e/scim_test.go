@@ -16,6 +16,7 @@ import (
 
 	"github.com/grepnest/grepnest/internal/account"
 	"github.com/grepnest/grepnest/internal/admin"
+	"github.com/grepnest/grepnest/internal/audit"
 	"github.com/grepnest/grepnest/internal/authn"
 	"github.com/grepnest/grepnest/internal/authz"
 	"github.com/grepnest/grepnest/internal/config"
@@ -114,7 +115,7 @@ func newSCIME2EHandler(t *testing.T, database milestoneDatabase, idp *oidcTestPr
 	repositories := &repository.Service{Store: database.store}
 	searchService := search.NewService(oidcSearchBackend{}, authorizer, search.Limits{MaxResults: 10, MaxResponseBytes: 64 << 10})
 	mux := http.NewServeMux()
-	httpapi.RegisterAuth(mux, false, false, true, []sso.Provider{&oidcclient.Provider{Client: client, Store: database.store, Sessions: sessions, LoginTTL: time.Minute}}, requestAuth, sessions, nil)
+	httpapi.RegisterAuth(mux, false, false, true, []sso.Provider{oidcclient.NewProvider(client, database.store, sessions, nil, time.Minute)}, requestAuth, sessions, nil)
 	httpapi.RegisterRepositories(mux, requestAuth, repositories, 64<<10, 10, 64<<10)
 	httpapi.RegisterSearch(mux, requestAuth, searchService, 64<<10, 64<<10)
 	httpapi.RegisterAccount(mux, requestAuth, &account.Service{Manager: tokens, Authorizer: authorizer}, 64<<10, 64<<10)
@@ -153,7 +154,7 @@ func adminSessionClient(t *testing.T, database milestoneDatabase, server *httpte
 	t.Helper()
 	token, _, err := (authn.SessionManager{Store: database.store, IdleTTL: time.Hour, TTL: 2 * time.Hour}).Create(t.Context(), authn.Identity{
 		Provider: "oidc", Issuer: "https://admin.example", Subject: "admin", LinkID: "directory-admin",
-	})
+	}, audit.OperationOIDCLoginSucceeded)
 	if err != nil {
 		t.Fatal(err)
 	}

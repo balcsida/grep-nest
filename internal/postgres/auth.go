@@ -13,26 +13,26 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) BindOIDCUser(ctx context.Context, issuer, subject, externalID string) (int64, error) {
+func (s *Store) BindFederatedUser(ctx context.Context, issuer, subject, externalID string) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	userID, err := bindOIDCUser(ctx, tx, issuer, subject, externalID)
+	userID, err := bindFederatedUser(ctx, tx, issuer, subject, externalID)
 	if err != nil {
 		return 0, err
 	}
 	return userID, tx.Commit(ctx)
 }
 
-func (s *Store) CreateOIDCSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord) error {
+func (s *Store) CreateFederatedSessionAudited(ctx context.Context, identity authn.Identity, session authn.SessionRecord, loginOperation string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	userID, err := bindOIDCUser(ctx, tx, identity.Issuer, identity.Subject, identity.LinkID)
+	userID, err := bindFederatedUser(ctx, tx, identity.Issuer, identity.Subject, identity.LinkID)
 	if err != nil {
 		return err
 	}
@@ -40,10 +40,10 @@ func (s *Store) CreateOIDCSessionAudited(ctx context.Context, identity authn.Ide
 	if err := createSession(ctx, tx, session); err != nil {
 		return err
 	}
-	for _, operation := range []string{audit.OperationOIDCLoginSucceeded, audit.OperationSessionCreated} {
+	for _, operation := range []string{loginOperation, audit.OperationSessionCreated} {
 		if err := appendAudit(ctx, tx, audit.Event{
 			ActorType: "user", ActorID: strconv.FormatInt(userID, 10),
-			TargetType: "session", TargetID: session.AuditID, AuthenticationMethod: "oidc",
+			TargetType: "session", TargetID: session.AuditID, AuthenticationMethod: identity.Provider,
 			Operation: operation, Outcome: "success",
 			RequestID: audit.RequestID(ctx),
 		}); err != nil {
@@ -53,7 +53,7 @@ func (s *Store) CreateOIDCSessionAudited(ctx context.Context, identity authn.Ide
 	return tx.Commit(ctx)
 }
 
-func bindOIDCUser(ctx context.Context, tx pgx.Tx, issuer, subject, externalID string) (int64, error) {
+func bindFederatedUser(ctx context.Context, tx pgx.Tx, issuer, subject, externalID string) (int64, error) {
 	var userID int64
 	err := tx.QueryRow(ctx, `select users.id from user_identities
 		join users on users.id=user_identities.user_id

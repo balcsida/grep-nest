@@ -23,6 +23,7 @@ corresponding values. The key names below are the defaults.
 | `secrets.githubApp.name` | `private-key.pem`, `webhook-secret` | GitHub App private key and webhook secret |
 | `secrets.customCA.name` | `ca.crt` | Optional GitHub CA bundle; set the key with `secrets.customCA.key` |
 | `secrets.oidc.name` | `client-secret` | OIDC client secret; set `secrets.oidc.clientSecretKey` to override |
+| `secrets.githubOAuth.name` | `client-secret` | GitHub OAuth client secret; set `secrets.githubOAuth.clientSecretKey` to override |
 | `secrets.oidcCA.name` | `ca.crt` | Optional IdP CA bundle; set `secrets.oidcCA.key` to override |
 | `secrets.scim.name` | `token` | Optional SCIM bearer token; set `secrets.scim.tokenKey` to override |
 | `images.pullSecrets[]` | Kubernetes pull-secret contract | Optional private-registry credentials |
@@ -124,6 +125,13 @@ when needed, `secrets.oidcCA`; never put their values in values files. With
 external egress enabled, configure the IdP CIDRs and HTTPS port in
 `networkPolicy.externalEgress.identityProvider`.
 
+Enable GitHub OAuth with `server.sso.githubOAuth.enabled=true`, the same HTTPS
+`server.sso.publicURL`, and `server.sso.githubOAuth.clientID`. Register
+`<publicURL>/auth/oauth/github/callback` at GitHub and reference the existing
+`secrets.githubOAuth` Secret. Its secret is mounted read-only at
+`/var/run/secrets/grepnest/oauth-github/client-secret`; it is never placed in
+values or a ConfigMap. GitHub OAuth uses the existing GitHub CA and egress.
+
 Enable SCIM with `server.scim.enabled=true`, the same HTTPS
 `server.sso.publicURL`, and an existing `secrets.scim` Secret. The token is
 mounted read-only at `/var/run/secrets/grepnest/scim/token`; it is never
@@ -136,8 +144,8 @@ routes. It provisions no user name, password, hash, salt, or Secret and never
 activates because OIDC is unavailable. Provision and rotate the operator
 password offline with `grepnest-admin` from the same digest-pinned application
 image configured in `images.application`, then follow the repository
-break-glass runbook. The chart requires OIDC to be enabled when break-glass is
-enabled.
+break-glass runbook. The chart requires OIDC or GitHub OAuth when break-glass
+is enabled.
 
 ## Scheduling, storage, and capacity
 

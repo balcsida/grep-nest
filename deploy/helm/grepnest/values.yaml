@@ -10,6 +10,7 @@ secrets:
   githubApp: {name: "", privateKeyKey: private-key.pem, webhookSecretKey: webhook-secret}
   customCA: {name: "", key: ca.crt}
   oidc: {name: "", clientSecretKey: client-secret}
+  githubOAuth: {name: "", clientSecretKey: client-secret}
   oidcCA: {name: "", key: ca.crt}
   scim: {name: "", tokenKey: token}
 breakGlass: {enabled: false}
@@ -45,6 +46,7 @@ server:
       scopes: [openid, profile, email]
       linkClaim: ""
       displayNameClaim: name
+    githubOAuth: {enabled: false, clientID: ""}
   scim: {enabled: false}
   resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
   nodeSelector: {}

@@ -96,6 +96,11 @@ end
 raise OpenAPIError, "graph cypher forbidden response is missing" unless graph_queries.fetch("cypher").dig("responses", "403").is_a?(Hash)
 
 schemas = document.fetch("components").fetch("schemas")
+audit_event = schemas.fetch("AuditEvent").fetch("properties")
+raise OpenAPIError, "AuditEvent.authentication_method omits oauth" unless audit_event.fetch("authentication_method").fetch("enum").include?("oauth")
+%w[oauth_login_succeeded oauth_login_denied].each do |operation|
+  raise OpenAPIError, "AuditEvent.operation omits #{operation}" unless audit_event.fetch("operation").fetch("enum").include?(operation)
+end
 auth_config = schemas.fetch("AuthConfig")
 raise OpenAPIError, "AuthConfig must require file_reads" unless auth_config.fetch("required").include?("file_reads")
 require_value(auth_config.dig("properties", "file_reads", "type"), "boolean", "AuthConfig.file_reads type")

@@ -111,6 +111,8 @@ services:
       GREPNEST_OIDC_SCOPES: ${GREPNEST_OIDC_SCOPES:-}
       GREPNEST_OIDC_LINK_CLAIM: ${GREPNEST_OIDC_LINK_CLAIM:-}
       GREPNEST_OIDC_DISPLAY_NAME_CLAIM: ${GREPNEST_OIDC_DISPLAY_NAME_CLAIM:-}
+      GREPNEST_OAUTH_GITHUB_CLIENT_ID: ${GREPNEST_OAUTH_GITHUB_CLIENT_ID:-}
+      GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE: ${GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE:+/run/secrets/grepnest/oauth-github-client-secret}
       GREPNEST_SCIM_TOKEN_FILE: ${GREPNEST_SCIM_TOKEN_FILE:+/run/secrets/grepnest/scim/token}
       GREPNEST_BREAK_GLASS_ENABLED: ${GREPNEST_BREAK_GLASS_ENABLED:-false}
     volumes:
@@ -141,6 +143,12 @@ services:
       - type: bind
         source: ${GREPNEST_OIDC_CA_FILE:-/dev/null}
         target: /run/secrets/grepnest/oidc-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${GREPNEST_OAUTH_GITHUB_CLIENT_SECRET_FILE:-/dev/null}
+        target: /run/secrets/grepnest/oauth-github-client-secret
         read_only: true
         bind:
           create_host_path: false

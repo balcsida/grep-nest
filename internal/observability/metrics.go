@@ -155,7 +155,7 @@ func (metrics *Metrics) ObserveGraphPhase(phase, result string, duration time.Du
 }
 
 func (metrics *Metrics) ObserveAuth(provider, event, result string) {
-	metrics.authEvents.WithLabelValues(fixed(provider, "oidc", "session", "static"), fixed(event, "login_start", "callback", "session_auth", "logout", "cleanup"), authResult(result)).Inc()
+	metrics.authEvents.WithLabelValues(fixed(provider, "oidc", "oauth", "session", "static"), fixed(event, "login_start", "callback", "session_auth", "logout", "cleanup"), authResult(result)).Inc()
 }
 
 func authResult(result string) string {
