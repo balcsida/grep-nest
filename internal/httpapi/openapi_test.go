@@ -17,6 +17,9 @@ func TestOpenAPIAdminJobsPaginationContract(t *testing.T) {
 	var document struct {
 		Paths map[string]struct {
 			Get struct {
+				Responses map[string]struct {
+					Ref string `yaml:"$ref"`
+				} `yaml:"responses"`
 				Parameters []struct {
 					Name     string `yaml:"name"`
 					In       string `yaml:"in"`
@@ -43,9 +46,13 @@ func TestOpenAPIAdminJobsPaginationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parameters := document.Paths["/v1/admin/jobs"].Get.Parameters
+	adminJobs := document.Paths["/v1/admin/jobs"].Get
+	parameters := adminJobs.Parameters
 	if len(parameters) != 1 || parameters[0].Name != "cursor" || parameters[0].In != "query" || parameters[0].Required == nil || *parameters[0].Required || parameters[0].Schema.Type != "string" || parameters[0].Schema.MinLength != 1 {
 		t.Fatalf("admin jobs cursor parameter = %#v, want optional non-empty query string", parameters)
+	}
+	if response := adminJobs.Responses["400"]; response.Ref != "#/components/responses/InvalidRequest" {
+		t.Errorf("admin jobs 400 response = %#v, want InvalidRequest", response)
 	}
 
 	jobs := document.Components.Schemas["AdminJobList"]

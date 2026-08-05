@@ -103,6 +103,8 @@ func TestAdminJobsRejectsInvalidCursors(t *testing.T) {
 	for name, cursor := range map[string]string{
 		"not base64":          "not-base64",
 		"unsupported version": encode(`{"v":2,"updated_at":"` + validTime + `","id":1}`),
+		"malformed timestamp": encode(`{"v":1,"updated_at":"not-a-timestamp","id":1}`),
+		"zero timestamp":      encode(`{"v":1,"updated_at":"0001-01-01T00:00:00Z","id":1}`),
 		"zero ID":             encode(`{"v":1,"updated_at":"` + validTime + `","id":0}`),
 		"second JSON value":   encode(`{"v":1,"updated_at":"` + validTime + `","id":1} {}`),
 	} {

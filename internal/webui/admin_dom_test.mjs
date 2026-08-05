@@ -192,6 +192,28 @@ delete responses["/v1/admin/jobs?cursor=fresh-page-2"];
 refresh();
 await new Promise(resolve => setTimeout(resolve, 0));
 
+responses["/v1/admin/jobs"] = {jobs:initialJobs.jobs.slice(0,2).map((job,id)=>({...job,id:id+201})),next_cursor:"fresh-error-page"};
+responses["/v1/admin/jobs?cursor=fresh-error-page"] = {jobs:[]};
+let rejectJobs;
+delayedJobs = new Promise((_, reject) => { rejectJobs = reject; });
+const staleJobsError = ids.get("load-older-jobs").dispatch("click");
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+const refreshedStatus = {text:ids.get("admin-status").textContent,className:ids.get("admin-status").className};
+rejectJobs(new Error("stale cursor failed"));
+await staleJobsError;
+assert.deepEqual(ids.get("job-rows").children.map(row=>row.children[0].textContent), ["#201","#202"]);
+assert.equal(ids.get("load-older-jobs").disabled, false);
+assert.equal(ids.get("load-older-jobs").hidden, false);
+assert.deepEqual({text:ids.get("admin-status").textContent,className:ids.get("admin-status").className}, refreshedStatus);
+await ids.get("load-older-jobs").dispatch("click");
+assert.equal(requests.at(-1).path, "/v1/admin/jobs?cursor=fresh-error-page");
+delayedJobs = null;
+responses["/v1/admin/jobs"] = initialJobs;
+delete responses["/v1/admin/jobs?cursor=fresh-error-page"];
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+
 const repositoryRows = ids.get("repo-rows").children;
 assert.equal(repositoryRows[0].children[1].textContent, "7");
 assert.equal(repositoryRows[0].children[5].textContent, "—");

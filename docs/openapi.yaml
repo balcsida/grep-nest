@@ -192,6 +192,7 @@ paths:
           schema: {type: string, minLength: 1}
       responses:
         '200': {description: Cursor-paginated indexing job inventory, content: {application/json: {schema: {$ref: '#/components/schemas/AdminJobList'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '503': {$ref: '#/components/responses/Unavailable'}
