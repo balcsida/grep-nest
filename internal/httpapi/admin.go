@@ -1,10 +1,15 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/grepnest/grepnest/internal/admin"
 	"github.com/grepnest/grepnest/internal/authn"
@@ -34,11 +39,26 @@ func RegisterAdmin(mux *http.ServeMux, authenticator authn.RequestAuthenticator,
 		}{items, truncated}, err
 	}))
 	mux.Handle("/v1/admin/jobs", get(func(request *http.Request) (any, error) {
-		items, truncated, err := service.Jobs(request.Context(), PrincipalFromContext(request.Context()))
+		cursor, err := decodeAdminJobCursor(request.URL.Query().Get("cursor"))
+		if err != nil {
+			return nil, err
+		}
+		items, truncated, err := service.Jobs(request.Context(), PrincipalFromContext(request.Context()), cursor)
+		if err != nil {
+			return nil, err
+		}
+		var nextCursor string
+		if truncated {
+			if len(items) == 0 {
+				return nil, errors.New("truncated jobs response is empty")
+			}
+			nextCursor, err = encodeAdminJobCursor(items[len(items)-1])
+		}
 		return struct {
-			Jobs      []admin.Job `json:"jobs"`
-			Truncated bool        `json:"truncated"`
-		}{items, truncated}, err
+			Jobs       []admin.Job `json:"jobs"`
+			Truncated  bool        `json:"truncated"`
+			NextCursor string      `json:"next_cursor,omitempty"`
+		}{items, truncated, nextCursor}, err
 	}))
 	mux.Handle("/v1/admin/scip/uploads", get(func(request *http.Request) (any, error) {
 		items, truncated, err := service.SCIPUploads(request.Context(), PrincipalFromContext(request.Context()))
@@ -98,6 +118,36 @@ func RegisterAdmin(mux *http.ServeMux, authenticator authn.RequestAuthenticator,
 		},
 	))
 	registerAdminIdentity(mux, authenticator, service, maxRequestBytes, maxResponseBytes)
+}
+
+type adminJobCursor struct {
+	Version   int       `json:"v"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ID        int64     `json:"id"`
+}
+
+func decodeAdminJobCursor(value string) (*admin.JobCursor, error) {
+	if value == "" {
+		return nil, nil
+	}
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, admin.ErrInvalid
+	}
+	var cursor adminJobCursor
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&cursor); err != nil {
+		return nil, admin.ErrInvalid
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || cursor.Version != 1 || cursor.UpdatedAt.IsZero() || cursor.ID <= 0 {
+		return nil, admin.ErrInvalid
+	}
+	return &admin.JobCursor{UpdatedAt: cursor.UpdatedAt, ID: cursor.ID}, nil
+}
+
+func encodeAdminJobCursor(job admin.Job) (string, error) {
+	data, err := json.Marshal(adminJobCursor{Version: 1, UpdatedAt: job.UpdatedAt, ID: job.ID})
+	return base64.RawURLEncoding.EncodeToString(data), err
 }
 
 func adminPathID(path, prefix, suffix string) (int64, bool) {

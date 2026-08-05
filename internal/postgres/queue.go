@@ -10,14 +10,21 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func (s *Store) AdminJobs(ctx context.Context, installationID int64, repositoryIDs []int64, limit int) ([]admin.Job, bool, error) {
+func (s *Store) AdminJobs(ctx context.Context, installationID int64, repositoryIDs []int64, limit int, cursor *admin.JobCursor) ([]admin.Job, bool, error) {
+	var updatedAt *time.Time
+	var id int64
+	if cursor != nil {
+		updatedAt, id = &cursor.UpdatedAt, cursor.ID
+	}
 	rows, err := s.pool.Query(ctx, `select jobs.id,repositories.github_id,repositories.owner||'/'||repositories.name,
 		jobs.target_sha,jobs.target_ref,jobs.reason,jobs.state,coalesce(jobs.error_code,''),jobs.attempt,jobs.max_attempts,
 		jobs.priority,jobs.run_after,jobs.created_at,jobs.updated_at from index_jobs jobs
 		join repositories on repositories.id=jobs.repository_id join installations on installations.id=repositories.installation_id
 		where ($1=0 and coalesce(cardinality($2::bigint[]),0)=0 and installations.status='active' and repositories.enabled and not repositories.archived
 			or ($1=0 or installations.github_id=$1) and repositories.github_id=any($2))
-		order by jobs.updated_at desc,jobs.id desc limit $3`, installationID, repositoryIDs, limit+1)
+		and ($3::timestamptz is null or (jobs.updated_at, jobs.id) < ($3, $4))
+		order by jobs.updated_at desc, jobs.id desc
+		limit $5`, installationID, repositoryIDs, updatedAt, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

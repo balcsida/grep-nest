@@ -232,7 +232,7 @@ func (*identityStore) AdminOverview(context.Context, int64, []int64) (Overview, 
 func (*identityStore) AdminRepositories(context.Context, int64, []int64, int) ([]Repository, bool, error) {
 	return nil, false, nil
 }
-func (*identityStore) AdminJobs(context.Context, int64, []int64, int) ([]Job, bool, error) {
+func (*identityStore) AdminJobs(context.Context, int64, []int64, int, *JobCursor) ([]Job, bool, error) {
 	return nil, false, nil
 }
 func (*identityStore) AdminSCIPUploads(context.Context, int64, []int64, int) ([]SCIPUpload, bool, error) {

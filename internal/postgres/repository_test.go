@@ -272,6 +272,53 @@ func TestGraphRepositoriesEnforcePrincipalEligibility(t *testing.T) {
 
 func timePtr(value time.Time) *time.Time { return &value }
 
+func TestAdminJobsPaginatesAuthorizedJobs(t *testing.T) {
+	store := migratedStore(t)
+	repositoryID := queueRepository(t, store)
+	if err := store.UpsertInstallation(t.Context(), InstallationUpdate{GitHubID: 20, AccountLogin: "other", AccountType: "Organization", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.UpsertRepository(t.Context(), RepositoryUpdate{GitHubID: 202, InstallationID: 20, Owner: "other", Name: "two", DefaultBranch: "main", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(t.Context(), `insert into index_jobs(repository_id,target_sha,state,updated_at)
+		select $1,$2,'succeeded',$3::timestamptz+series*interval '1 second' from generate_series(1,27) series`,
+		repositoryID, shaA, time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	var unauthorizedID int64
+	if err := store.pool.QueryRow(t.Context(), `insert into index_jobs(repository_id,target_sha,state,updated_at)
+		values($1,$2,'succeeded',$3) returning id`, other.ID, shaB, time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)).Scan(&unauthorizedID); err != nil {
+		t.Fatal(err)
+	}
+
+	first, more, err := store.AdminJobs(t.Context(), 10, []int64{101}, 25, nil)
+	if err != nil || len(first) != 25 || !more {
+		t.Fatalf("first page length=%d more=%v err=%v", len(first), more, err)
+	}
+	cursor := &admin.JobCursor{UpdatedAt: first[len(first)-1].UpdatedAt, ID: first[len(first)-1].ID}
+	second, more, err := store.AdminJobs(t.Context(), 10, []int64{101}, 25, cursor)
+	if err != nil || len(second) != 2 || more {
+		t.Fatalf("second page=%#v more=%v err=%v", second, more, err)
+	}
+	seen := make(map[int64]bool, len(first))
+	for _, job := range first {
+		seen[job.ID] = true
+		if job.ID == unauthorizedID {
+			t.Fatal("unauthorized job appeared on first page")
+		}
+	}
+	for _, job := range second {
+		if seen[job.ID] {
+			t.Fatalf("job %d appears on both pages", job.ID)
+		}
+		if job.ID == unauthorizedID {
+			t.Fatal("unauthorized job appeared on second page")
+		}
+	}
+}
+
 func TestAdminDataIsBoundedAndSanitized(t *testing.T) {
 	store := migratedStore(t)
 	repositoryID := queueRepository(t, store)
@@ -303,7 +350,7 @@ func TestAdminDataIsBoundedAndSanitized(t *testing.T) {
 	if err != nil || len(repositories) != 1 || truncated {
 		t.Fatalf("repositories=%#v truncated=%v err=%v", repositories, truncated, err)
 	}
-	jobs, _, err := store.AdminJobs(t.Context(), 10, []int64{101}, 10)
+	jobs, _, err := store.AdminJobs(t.Context(), 10, []int64{101}, 10, nil)
 	if err != nil || len(jobs) != 1 || jobs[0].RepositoryID != 101 {
 		t.Fatalf("jobs=%#v err=%v", jobs, err)
 	}
