@@ -266,6 +266,11 @@ type scipStoreStub struct {
 	locations            []scipgraph.Location
 	replacedCommit       string
 	replacePackagesCalls int
+	scipCommit           string
+}
+
+func (store *scipStoreStub) SCIPIndexCommit(context.Context, int64) (string, error) {
+	return store.scipCommit, nil
 }
 
 func (store *scipStoreStub) AuthorizedRepository(_ context.Context, _ int64, ids []int64, id int64) (repository.Repository, error) {

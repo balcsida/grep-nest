@@ -22,6 +22,13 @@ var (
 	ErrForbidden      = errors.New("forbidden")
 	ErrInvalidRequest = errors.New("invalid_request")
 	ErrNotIndexed     = errors.New("not_indexed")
+	// Navigate used to collapse all four conditions below into ErrNotIndexed, which
+	// reported a healthy, search-indexed repository as unindexed. They are distinct
+	// causes with distinct operator remedies, so they get distinct sentinels.
+	ErrStaleCommit     = errors.New("stale_commit")
+	ErrSCIPUnavailable = errors.New("scip_unavailable")
+	ErrSCIPStale       = errors.New("scip_stale")
+	ErrSymbolNotFound  = errors.New("symbol_not_found")
 )
 
 type ServiceStore interface {
@@ -29,6 +36,9 @@ type ServiceStore interface {
 	AnyAuthorizedRepository(context.Context, int64) (repository.Repository, error)
 	ReplaceSCIP(context.Context, int64, string, Upload) error
 	OccurrenceAt(context.Context, int64, string, string, int, OccurrencePosition) (StoredOccurrence, error)
+	// SCIPIndexCommit reports the commit of the most recent SCIP upload for a
+	// repository, or "" when none exists. Consulted only on the error path.
+	SCIPIndexCommit(context.Context, int64) (string, error)
 	Locations(context.Context, authn.Principal, StoredOccurrence, string, int) ([]Location, bool, error)
 	ReplacePackages(context.Context, int64, string, []PackageMapping) error
 }
@@ -142,11 +152,11 @@ func (service *Service) Navigate(ctx context.Context, principal authn.Principal,
 		return api.SCIPNavigationResponse{}, ErrNotIndexed
 	}
 	if request.Commit != "" && request.Commit != repository.IndexedSHA {
-		return api.SCIPNavigationResponse{}, ErrNotIndexed
+		return api.SCIPNavigationResponse{}, ErrStaleCommit
 	}
 	origin, err := service.Store.OccurrenceAt(ctx, repository.ID, repository.IndexedSHA, request.Path, request.Line-1, navigationPosition(request))
 	if errors.Is(err, ErrOccurrenceNotFound) {
-		return api.SCIPNavigationResponse{}, ErrNotIndexed
+		return api.SCIPNavigationResponse{}, service.classifyMissingOccurrence(ctx, repository)
 	}
 	if err != nil {
 		return api.SCIPNavigationResponse{}, err
@@ -171,6 +181,24 @@ func (service *Service) Navigate(ctx context.Context, principal authn.Principal,
 		})
 	}
 	return response, nil
+}
+
+// classifyMissingOccurrence explains why no occurrence was found. OccurrenceAt joins
+// uploads against the repository's current indexed_sha, so a SCIP index built for an
+// older commit is invisible to it and is indistinguishable from an absent one without
+// this extra lookup.
+func (service *Service) classifyMissingOccurrence(ctx context.Context, repo repository.Repository) error {
+	commit, err := service.Store.SCIPIndexCommit(ctx, repo.ID)
+	switch {
+	case err != nil:
+		return err
+	case commit == "":
+		return ErrSCIPUnavailable
+	case commit != repo.IndexedSHA:
+		return ErrSCIPStale
+	default:
+		return ErrSymbolNotFound
+	}
 }
 
 func (service *Service) SetDependencies(ctx context.Context, principal authn.Principal, repositoryID int64, purls api.RepositoryPackages) error {

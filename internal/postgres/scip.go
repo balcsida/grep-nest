@@ -169,6 +169,16 @@ func (s *Store) OccurrenceAt(ctx context.Context, repositoryID int64, commit, pa
 	return occurrence, err
 }
 
+func (s *Store) SCIPIndexCommit(ctx context.Context, repositoryID int64) (string, error) {
+	var commit string
+	err := s.pool.QueryRow(ctx, `select commit from scip_uploads where repository_id=$1
+		order by uploaded_at desc, id desc limit 1`, repositoryID).Scan(&commit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return commit, err
+}
+
 func (s *Store) Locations(ctx context.Context, principal authn.Principal, origin scipgraph.StoredOccurrence, operation string, max int) ([]scipgraph.Location, bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
