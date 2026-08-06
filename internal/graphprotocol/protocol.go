@@ -1,6 +1,19 @@
 package graphprotocol
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// Transport failure causes shared by the graph client and its callers. Callers used to
+// see every one of these as a single opaque "graph service is unavailable", which hides
+// the difference between a misconfigured secret and an unreachable runtime.
+var (
+	ErrUnauthorized  = errors.New("graph_unauthorized")
+	ErrUnreachable   = errors.New("graph_unreachable")
+	ErrInvalidReply  = errors.New("graph_invalid_response")
+	ErrReplyTooLarge = errors.New("graph_response_too_large")
+)
 
 const (
 	StatusFound     = "found"

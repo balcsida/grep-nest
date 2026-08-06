@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/grepnest/grepnest/internal/authn"
+	"github.com/grepnest/grepnest/internal/graphprotocol"
 	"github.com/grepnest/grepnest/internal/graphservice"
 	"github.com/grepnest/grepnest/pkg/api"
 )
@@ -64,6 +65,14 @@ func classifyGraphQueryError(err error) (int, string, string, bool) {
 		return http.StatusConflict, "branch_not_indexed", "branch is not indexed", false
 	case errors.Is(err, graphservice.ErrGraphNotReady):
 		return http.StatusConflict, "graph_not_ready", "graph is not ready", true
+	case errors.Is(err, graphprotocol.ErrUnauthorized):
+		return http.StatusBadGateway, "graph_unauthorized", "graph runtime rejected the request; check the shared internal secret", false
+	case errors.Is(err, graphprotocol.ErrUnreachable):
+		return http.StatusServiceUnavailable, "graph_unreachable", "graph runtime is unreachable; check that it is running and that the graph URL is correct", true
+	case errors.Is(err, graphprotocol.ErrInvalidReply):
+		return http.StatusBadGateway, "graph_invalid_response", "graph runtime returned a malformed response", false
+	case errors.Is(err, graphprotocol.ErrReplyTooLarge):
+		return http.StatusBadGateway, "graph_response_too_large", "graph runtime response exceeded the configured limit", false
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "timeout", "graph query timed out", true
 	default:

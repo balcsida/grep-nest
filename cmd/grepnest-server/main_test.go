@@ -546,6 +546,9 @@ func (store *deadlineSCIPStore) AuthorizedRepository(_ context.Context, _ int64,
 func (store *deadlineSCIPStore) AnyAuthorizedRepository(_ context.Context, id int64) (repository.Repository, error) {
 	return store.AuthorizedRepository(context.Background(), 0, nil, id)
 }
+func (store *deadlineSCIPStore) SCIPIndexCommit(context.Context, int64) (string, error) {
+	return store.repository.IndexedSHA, nil
+}
 func (store *deadlineSCIPStore) ReplaceSCIP(context.Context, int64, string, scipgraph.Upload) error {
 	if store.writeDeadlineSet != nil && store.writeDeadlineSet.Load() {
 		store.writeDeadlineSetDuringReplace.Store(true)

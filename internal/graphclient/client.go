@@ -34,6 +34,23 @@ func (err *Error) Error() string {
 	return "graph client: " + err.Code
 }
 
+// Unwrap exposes the transport failure cause so callers can distinguish a rejected
+// secret from an unreachable runtime with errors.Is.
+func (err *Error) Unwrap() error {
+	switch err.Code {
+	case "unauthorized":
+		return graphprotocol.ErrUnauthorized
+	case "unavailable":
+		return graphprotocol.ErrUnreachable
+	case "invalid_response":
+		return graphprotocol.ErrInvalidReply
+	case "response_too_large":
+		return graphprotocol.ErrReplyTooLarge
+	default:
+		return nil
+	}
+}
+
 func New(baseURL string, secret []byte, httpClient *http.Client, maxResponseBytes int64) (*Client, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" ||

@@ -688,3 +688,45 @@ func seedReadyRepository(t *testing.T, store *Store, githubID int64, sha string)
 	}
 	return repository.ID
 }
+
+func TestLocationsAllowUnscopedInstallationPrincipals(t *testing.T) {
+	store := migratedStore(t)
+	originID := seedReadyRepository(t, store, 101, testSHA('a'))
+	providerID := seedReadyRepository(t, store, 102, testSHA('b'))
+	const dependencySymbol = "scip gomod example.com/acme/lib v1 pkg/Item#"
+	if err := store.ReplaceSCIP(t.Context(), originID, testSHA('a'), scipgraph.Upload{Occurrences: []scipgraph.Occurrence{
+		{Path: "origin.go", Symbol: globalSymbol, EndCharacter: 2, PositionEncoding: 1},
+		{Path: "definition.go", Symbol: globalSymbol, EndCharacter: 2, PositionEncoding: 1, Roles: definitionRole},
+		{Path: "dependent.go", Symbol: dependencySymbol, EndCharacter: 2, PositionEncoding: 1},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceSCIP(t.Context(), providerID, testSHA('b'), uploadWith("provider.go", dependencySymbol, definitionRole)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplacePackages(t.Context(), providerID, "manual", []scipgraph.PackageMapping{packageMapping("pkg:golang/example.com/acme/lib@v1", "provides", "manual")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplacePackages(t.Context(), originID, "manual", []scipgraph.PackageMapping{packageMapping("pkg:golang/example.com/acme/lib@v1", "depends_on", "manual")}); err != nil {
+		t.Fatal(err)
+	}
+
+	principal := authn.Principal{RepositoryIDs: []int64{101, 102}}
+	origin, err := store.OccurrenceAt(t.Context(), originID, testSHA('a'), "origin.go", 0, occurrencePosition(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions, _, err := store.Locations(t.Context(), principal, origin, "definitions", 10)
+	if err != nil || len(definitions) != 1 || definitions[0].Path != "definition.go" {
+		t.Fatalf("definitions = %#v, err = %v", definitions, err)
+	}
+
+	dependent, err := store.OccurrenceAt(t.Context(), originID, testSHA('a'), "dependent.go", 0, occurrencePosition(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossRepo, _, err := store.Locations(t.Context(), principal, dependent, "definitions", 10)
+	if err != nil || len(crossRepo) != 1 || crossRepo[0].RepositoryID != 102 || crossRepo[0].Path != "provider.go" {
+		t.Fatalf("crossRepo = %#v, err = %v", crossRepo, err)
+	}
+}

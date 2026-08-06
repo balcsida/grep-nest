@@ -448,6 +448,11 @@ type mcpSCIPStore struct {
 	repository    repository.Repository
 	locations     []scipgraph.Location
 	occurrenceErr error
+	scipCommit    string
+}
+
+func (store *mcpSCIPStore) SCIPIndexCommit(context.Context, int64) (string, error) {
+	return store.scipCommit, nil
 }
 
 func (store *mcpSCIPStore) AuthorizedRepository(_ context.Context, _ int64, _ []int64, _ int64) (repository.Repository, error) {

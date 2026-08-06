@@ -929,7 +929,7 @@ components:
     RepositorySummary:
       type: object
       additionalProperties: false
-      required: [id, github_id, name, branch, desired_sha, indexed_sha, web_url, status, error_code, search_node]
+      required: [id, github_id, name, branch, desired_sha, indexed_sha, web_url, status, error_code, search_node, scip_status]
       properties:
         id: {type: integer, format: int64}
         github_id: {type: integer, format: int64}
@@ -942,6 +942,15 @@ components:
         error_code: {type: string}
         search_node: {type: string}
         last_indexed_at: {type: string, format: date-time}
+        scip_status:
+          type: string
+          enum: [current, stale, absent, unknown]
+          description: >-
+            Whether the SCIP index backing code navigation is current with indexed_sha.
+            Search health is independent of this; navigation fails unless it is "current".
+        scip_commit:
+          type: string
+          description: Commit of the most recent SCIP upload, when one exists.
     GraphStatus:
       type: object
       additionalProperties: false

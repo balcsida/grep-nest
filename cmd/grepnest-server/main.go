@@ -65,7 +65,7 @@ func run() int {
 	}
 	handler, closeRuntime, err := newRuntime(ctx, settings, logger)
 	if err != nil {
-		logger.Error("server setup failed")
+		logger.Error("server setup failed", "error", err)
 		return 1
 	}
 	defer closeRuntime()
@@ -306,7 +306,7 @@ func newDurableRuntime(ctx context.Context, settings config.Config, logger *slog
 		return fail(err)
 	}
 	searchService := search.NewService(backend, authz.NewPostgres(store), searchLimits(settings))
-	repositoryService := &repository.Service{Store: store, GitHub: githubClient}
+	repositoryService := &repository.Service{Store: store, GitHub: githubClient, SCIP: store}
 	scipService := &scipgraph.Service{Store: store, GitHub: githubClient, MaxResults: settings.Limits.MaxResults}
 	graphService := &graphingest.Service{Store: store}
 	graphQueries := &graphservice.Service{Store: store, Backend: graphClient, Files: repositoryService, Limits: graphQueryLimits(settings.Graph), Observe: metrics.ObserveGraphQuery}
