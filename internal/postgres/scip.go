@@ -208,7 +208,7 @@ const exactLocationsSQL = `with authorized_uploads as (
 		from scip_uploads uploads
 		join repositories on repositories.id=uploads.repository_id and repositories.indexed_sha=uploads.commit
 		join installations on installations.id=repositories.installation_id
-		where installations.github_id=$1 and repositories.github_id=any($2)
+		where ($1=0 or installations.github_id=$1) and repositories.github_id=any($2)
 		and installations.status='active' and repositories.enabled and not repositories.archived
 	), origin_authorized as (
 		select id from authorized_uploads where id=$4 and repository_id=$8
@@ -303,7 +303,7 @@ func (s *Store) approximateLocations(ctx context.Context, tx pgx.Tx, principal a
 		from scip_uploads uploads
 		join repositories on repositories.id=uploads.repository_id and repositories.indexed_sha=uploads.commit
 		join installations on installations.id=repositories.installation_id
-		where installations.github_id=$1 and repositories.github_id=any($2)
+		where ($1=0 or installations.github_id=$1) and repositories.github_id=any($2)
 		and installations.status='active' and repositories.enabled and not repositories.archived
 	), origin_authorized as (
 		select id from authorized_uploads where id=$3 and repository_id=$4
