@@ -65,7 +65,7 @@ func run() int {
 	}
 	handler, closeRuntime, err := newRuntime(ctx, settings, logger)
 	if err != nil {
-		logger.Error("server setup failed")
+		logger.Error("server setup failed", "error", err)
 		return 1
 	}
 	defer closeRuntime()
