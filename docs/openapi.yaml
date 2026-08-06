@@ -185,8 +185,14 @@ paths:
   /v1/admin/jobs:
     get:
       security: [{bearerAuth: []}, {sessionCookie: []}]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: {type: string, minLength: 1}
       responses:
-        '200': {description: Bounded indexing job inventory, content: {application/json: {schema: {$ref: '#/components/schemas/AdminJobList'}}}}
+        '200': {description: Cursor-paginated indexing job inventory, content: {application/json: {schema: {$ref: '#/components/schemas/AdminJobList'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthenticated'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '503': {$ref: '#/components/responses/Unavailable'}
@@ -812,8 +818,9 @@ components:
       additionalProperties: false
       required: [jobs, truncated]
       properties:
-        jobs: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AdminJob'}}
+        jobs: {type: array, maxItems: 25, items: {$ref: '#/components/schemas/AdminJob'}}
         truncated: {type: boolean}
+        next_cursor: {type: string, minLength: 1}
     AdminJob:
       type: object
       additionalProperties: false

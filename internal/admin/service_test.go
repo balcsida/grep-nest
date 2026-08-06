@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/grepnest/grepnest/internal/audit"
 	"github.com/grepnest/grepnest/internal/authn"
@@ -113,6 +114,23 @@ func TestServiceRejectsAdministratorAPITokenReconcile(t *testing.T) {
 	}
 }
 
+func TestServiceJobsUsesFixedPageSizeAndForwardsCursor(t *testing.T) {
+	cursor := &JobCursor{UpdatedAt: time.Unix(123, 0), ID: 42}
+	store := &fakeStore{}
+	service := &Service{Store: store, MaxItems: 100}
+	principal := authn.Principal{Administrator: true, InstallationID: 10, RepositoryIDs: []int64{101}}
+
+	if _, _, err := service.Jobs(t.Context(), principal, cursor); err != nil {
+		t.Fatal(err)
+	}
+	if store.jobsLimit != 25 {
+		t.Fatalf("limit = %d, want 25", store.jobsLimit)
+	}
+	if store.jobsCursor != cursor {
+		t.Fatalf("cursor = %#v, want unchanged %#v", store.jobsCursor, cursor)
+	}
+}
+
 func TestServiceScopesReconcileAndRetry(t *testing.T) {
 	store := &fakeStore{}
 	service := &Service{Store: store, GitHub: fakeGitHub{repositories: []githubapp.Repository{
@@ -143,6 +161,8 @@ type fakeStore struct {
 	retryRepositoryIDs  []int64
 	reconciled          []githubapp.Repository
 	globalLookups       int
+	jobsLimit           int
+	jobsCursor          *JobCursor
 }
 
 func (*fakeStore) AuditEvents(context.Context, int) ([]audit.Event, bool, error) {
@@ -191,7 +211,9 @@ func (store *fakeStore) RevokeAdminUserCredentialsAudited(ctx context.Context, u
 func (*fakeStore) AdminRepositories(context.Context, int64, []int64, int) ([]Repository, bool, error) {
 	return nil, false, nil
 }
-func (*fakeStore) AdminJobs(context.Context, int64, []int64, int) ([]Job, bool, error) {
+func (store *fakeStore) AdminJobs(_ context.Context, _ int64, _ []int64, limit int, cursor *JobCursor) ([]Job, bool, error) {
+	store.jobsLimit = limit
+	store.jobsCursor = cursor
 	return nil, false, nil
 }
 func (*fakeStore) AdminSCIPUploads(context.Context, int64, []int64, int) ([]SCIPUpload, bool, error) {

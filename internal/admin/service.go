@@ -14,6 +14,8 @@ import (
 
 var ErrForbidden = errors.New("administrator access required")
 
+const jobsPageSize = 25
+
 type Overview struct {
 	Repositories  map[string]int64 `json:"repositories"`
 	Jobs          map[string]int64 `json:"jobs"`
@@ -38,6 +40,11 @@ type Repository struct {
 	Private        bool       `json:"private"`
 	Archived       bool       `json:"archived"`
 	LastIndexedAt  *time.Time `json:"last_indexed_at,omitempty"`
+}
+
+type JobCursor struct {
+	UpdatedAt time.Time
+	ID        int64
 }
 
 type Job struct {
@@ -136,7 +143,7 @@ type Store interface {
 	RevokeAdminUserCredentials(context.Context, int64) error
 	AdminOverview(context.Context, int64, []int64) (Overview, error)
 	AdminRepositories(context.Context, int64, []int64, int) ([]Repository, bool, error)
-	AdminJobs(context.Context, int64, []int64, int) ([]Job, bool, error)
+	AdminJobs(context.Context, int64, []int64, int, *JobCursor) ([]Job, bool, error)
 	AdminSCIPUploads(context.Context, int64, []int64, int) ([]SCIPUpload, bool, error)
 	AdminSCIPDependencies(context.Context, int64, []int64, int) ([]SCIPDependency, bool, error)
 	AdminDeliveries(context.Context, int64, []int64, int) ([]Delivery, bool, error)
@@ -176,11 +183,11 @@ func (service *Service) Repositories(ctx context.Context, principal authn.Princi
 	return service.Store.AdminRepositories(ctx, principal.InstallationID, principal.RepositoryIDs, service.limit())
 }
 
-func (service *Service) Jobs(ctx context.Context, principal authn.Principal) ([]Job, bool, error) {
+func (service *Service) Jobs(ctx context.Context, principal authn.Principal, cursor *JobCursor) ([]Job, bool, error) {
 	if err := requireAdmin(principal); err != nil {
 		return nil, false, err
 	}
-	return service.Store.AdminJobs(ctx, principal.InstallationID, principal.RepositoryIDs, service.limit())
+	return service.Store.AdminJobs(ctx, principal.InstallationID, principal.RepositoryIDs, jobsPageSize, cursor)
 }
 
 func (service *Service) SCIPUploads(ctx context.Context, principal authn.Principal) ([]SCIPUpload, bool, error) {

@@ -55,9 +55,10 @@ globalThis.document = document;
 globalThis.Node = FakeNode;
 globalThis.location = {hash: ""};
 globalThis.window = {confirm: () => true};
-globalThis.setInterval = () => 0;
+let refresh;
+globalThis.setInterval = callback => { refresh = callback; return 0; };
 const storage = new Map([["grepnest_admin_token", "admin"]]);
-let storageUnavailable = true;
+const storageUnavailable = true;
 let storageRemovals = 0;
 globalThis.sessionStorage = {
   has: key => storage.has(key),
@@ -79,7 +80,7 @@ globalThis.sessionStorage = {
 for (const id of [
   "access-panel", "admin-shell", "admin-status", "access-message", "token", "title", "subtitle",
   "overview-cards", "dependency-health", "activity", "repo-rows", "repo-empty", "repo-statuses",
-  "job-rows", "job-empty", "queue-cards", "upload-list", "dependency-list", "delivery-rows",
+  "job-rows", "job-empty", "queue-cards", "load-older-jobs", "upload-list", "dependency-list", "delivery-rows",
   "delivery-empty", "github-cards", "github-config", "installations", "health-dot", "health-text",
   "ready-dot", "ready-text", "token-form", "logout", "theme", "repo-filter", "select-all",
   "reconcile", "github-reconcile", "reindex-selected", "scip-upload", "scip-file", "scip-repo",
@@ -90,6 +91,7 @@ for (const id of [
   "audit-rows", "audit-empty",
 ]) {
   const node = document.createElement(id.includes("form") || id.includes("upload") || id.includes("refresh") ? "form" : "div");
+  node.hidden = id === "load-older-jobs";
   ids.set(id, node);
 }
 for (const name of ["overview", "repositories", "queue", "users", "groups", "tokens", "audit", "scip", "webhooks", "github"]) {
@@ -107,7 +109,8 @@ const responses = {
     {github_id:7,name:"acme/repo",default_branch:"main",status:"mystery",error_code:""},
     {github_id:8,name:"acme/failed",default_branch:"main",status:"failed",error_code:"clone_failed"},
   ],truncated:true},
-  "/v1/admin/jobs": {jobs:["queued","running","succeeded","failed","superseded"].map((state,id)=>({id:id+1,repository:"acme/repo",target_ref:id === 0 ? "refs/heads/main" : "",target_sha:"a".repeat(40),state,error_code:id === 3 ? "index_failed" : "",attempt:1,max_attempts:3,updated_at:"2026-01-01T00:00:00Z"})),truncated:true},
+  "/v1/admin/jobs": {jobs:Array.from({length:25},(_,id)=>({id:id+1,repository:"acme/repo",target_ref:id === 0 ? "refs/heads/main" : "",target_sha:"a".repeat(40),state:["queued","running","succeeded","failed","superseded"][id%5],error_code:id === 3 ? "index_failed" : "",attempt:1,max_attempts:3,updated_at:"2026-01-01T00:00:00Z"})),truncated:true,next_cursor:"page-2"},
+  "/v1/admin/jobs?cursor=page-2": {jobs:[24,26,27].map(id=>({id,repository:"acme/repo",target_ref:"",target_sha:"b".repeat(40),state:"succeeded",error_code:"",attempt:1,max_attempts:3,updated_at:"2025-12-31T00:00:00Z"}))},
   "/v1/admin/users": {users:[{id:7,user_name:"ada",display_name:"Ada",scim_active:true,suspended:false,administrator:true,repository_ids:[101,102],direct_administrator:false,direct_repository_ids:[101]}],truncated:true},
   "/v1/admin/groups": {groups:[{id:9,display_name:"Engineering",administrator:true,repository_ids:[101,102],member_count:2}],truncated:true},
   "/v1/account/api-tokens": {tokens:[{id:3,prefix:"gnp_visible",repository_ids:[101],created_at:"2026-01-01T00:00:00Z",expires_at:"2026-08-29T00:00:00Z"}]},
@@ -124,9 +127,10 @@ const requests = [];
 let mutationDenial = 0;
 let allowMutation = false;
 let delayedOverview;
+let delayedJobs;
 let accountTokenDenied = false;
 let bearerIdentityDenied = false;
-let sessionAuthorized = true;
+const sessionAuthorized = true;
 globalThis.fetch = async (path, options = {}) => {
   requests.push({path, options});
   if (path === "/auth/logout") return {ok:true,status:204};
@@ -137,6 +141,7 @@ globalThis.fetch = async (path, options = {}) => {
   if (path === "/v1/account/api-tokens/3" && options.method === "DELETE") return {ok:true,status:204};
   if (bearerIdentityDenied && ["/v1/admin/users", "/v1/admin/groups", "/v1/admin/audit-events"].includes(path)) return {ok:false,status:403,json:async()=>({})};
   if (path === "/v1/admin/overview" && delayedOverview) return delayedOverview;
+  if (path === "/v1/admin/jobs?cursor=page-2" && delayedJobs) return delayedJobs;
   if (mutationDenial && options.method === "POST") return {ok:false,status:mutationDenial,json:async()=>({})};
   if (allowMutation && options.method === "POST") return {ok:true,status:200,json:async()=>({})};
   const body = responses[path];
@@ -156,6 +161,59 @@ assert.match(text(ids.get("queue-cards")), /queued.*running.*succeeded.*failed.*
 const mystery = all.find(node => node.textContent === "mystery");
 assert.ok(mystery && !mystery.className.includes("ok"), "unknown status must not be green");
 assert.match(text(ids.get("inventory-notices")), /partial/i);
+assert.doesNotMatch(text(ids.get("inventory-notices")), /jobs/i);
+assert.equal(ids.get("load-older-jobs").hidden, false);
+await ids.get("load-older-jobs").dispatch("click");
+assert.ok(requests.some(({path}) => path === "/v1/admin/jobs?cursor=page-2"));
+assert.equal(new Set(ids.get("job-rows").children.map(row => row.children[0].textContent)).size, 27);
+assert.equal(ids.get("load-older-jobs").hidden, true);
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(ids.get("job-rows").children.length, 25);
+
+const initialJobs = responses["/v1/admin/jobs"];
+responses["/v1/admin/jobs"] = {jobs:initialJobs.jobs.slice(0,2).map((job,id)=>({...job,id:id+101})),next_cursor:"fresh-page-2"};
+responses["/v1/admin/jobs?cursor=fresh-page-2"] = {jobs:[]};
+let resolveJobs;
+delayedJobs = new Promise(resolve => { resolveJobs = resolve; });
+const staleJobsPage = ids.get("load-older-jobs").dispatch("click");
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+resolveJobs({ok:true,status:200,json:async()=>({jobs:initialJobs.jobs.slice(2,4),next_cursor:"stale-page-3"})});
+await staleJobsPage;
+assert.deepEqual(ids.get("job-rows").children.map(row=>row.children[0].textContent), ["#101","#102"]);
+assert.equal(ids.get("load-older-jobs").disabled, false);
+assert.equal(ids.get("load-older-jobs").hidden, false);
+await ids.get("load-older-jobs").dispatch("click");
+assert.equal(requests.at(-1).path, "/v1/admin/jobs?cursor=fresh-page-2");
+delayedJobs = null;
+responses["/v1/admin/jobs"] = initialJobs;
+delete responses["/v1/admin/jobs?cursor=fresh-page-2"];
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+
+responses["/v1/admin/jobs"] = {jobs:initialJobs.jobs.slice(0,2).map((job,id)=>({...job,id:id+201})),next_cursor:"fresh-error-page"};
+responses["/v1/admin/jobs?cursor=fresh-error-page"] = {jobs:[]};
+let rejectJobs;
+delayedJobs = new Promise((_, reject) => { rejectJobs = reject; });
+const staleJobsError = ids.get("load-older-jobs").dispatch("click");
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+const refreshedStatus = {text:ids.get("admin-status").textContent,className:ids.get("admin-status").className};
+rejectJobs(new Error("stale cursor failed"));
+await staleJobsError;
+assert.deepEqual(ids.get("job-rows").children.map(row=>row.children[0].textContent), ["#201","#202"]);
+assert.equal(ids.get("load-older-jobs").disabled, false);
+assert.equal(ids.get("load-older-jobs").hidden, false);
+assert.deepEqual({text:ids.get("admin-status").textContent,className:ids.get("admin-status").className}, refreshedStatus);
+await ids.get("load-older-jobs").dispatch("click");
+assert.equal(requests.at(-1).path, "/v1/admin/jobs?cursor=fresh-error-page");
+delayedJobs = null;
+responses["/v1/admin/jobs"] = initialJobs;
+delete responses["/v1/admin/jobs?cursor=fresh-error-page"];
+refresh();
+await new Promise(resolve => setTimeout(resolve, 0));
+
 const repositoryRows = ids.get("repo-rows").children;
 assert.equal(repositoryRows[0].children[1].textContent, "7");
 assert.equal(repositoryRows[0].children[5].textContent, "—");
@@ -234,7 +292,8 @@ assert.equal(upload.path, "/v1/scip/uploads?repository_id=7&commit=" + "a".repea
 assert.equal(upload.options.headers.get("Content-Type"), "application/vnd.scip+protobuf");
 assert.equal(upload.options.body, file);
 
-const retry = all.find(node => node.textContent === "Retry" && node !== repositoryRetry);
+const failedJobRow = ids.get("job-rows").children.find(row => row.children[4].children[0].textContent === "failed");
+const retry = failedJobRow.children.at(-1).children[0];
 await retry.dispatch("click");
 assert.ok(requests.some(request => request.path === "/v1/admin/jobs/4/retry" && request.options.method === "POST"));
 
