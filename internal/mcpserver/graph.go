@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/grepnest/grepnest/internal/graphprotocol"
 	"github.com/grepnest/grepnest/internal/graphservice"
 	"github.com/grepnest/grepnest/internal/httpapi"
 	"github.com/grepnest/grepnest/pkg/api"
@@ -56,6 +57,14 @@ func graphError(err error) error {
 		return errors.New("branch is not indexed")
 	case errors.Is(err, graphservice.ErrGraphNotReady):
 		return errors.New("graph is not ready")
+	case errors.Is(err, graphprotocol.ErrUnauthorized):
+		return errors.New("graph runtime rejected the request; check the shared internal secret")
+	case errors.Is(err, graphprotocol.ErrUnreachable):
+		return errors.New("graph runtime is unreachable; check that it is running and that the graph URL is correct")
+	case errors.Is(err, graphprotocol.ErrInvalidReply):
+		return errors.New("graph runtime returned a malformed response")
+	case errors.Is(err, graphprotocol.ErrReplyTooLarge):
+		return errors.New("graph runtime response exceeded the configured limit")
 	default:
 		return errors.New("graph service is unavailable")
 	}
