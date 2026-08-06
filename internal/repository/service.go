@@ -43,11 +43,19 @@ type ContentReader interface {
 	ReadContents(context.Context, int64, string, string, string, string, int64) (githubapp.Content, error)
 }
 
+// SCIPIndexReader reports the commit of a repository's most recent SCIP upload,
+// or "" when none exists.
+type SCIPIndexReader interface {
+	SCIPIndexCommit(context.Context, int64) (string, error)
+}
+
 type Service struct {
 	Store        ServiceStore
 	GitHub       ContentReader
 	MaxFileBytes int64
 	MaxLines     int
+	// SCIP is optional; when nil, status reports SCIPStatusUnknown.
+	SCIP SCIPIndexReader
 }
 
 func (service *Service) List(ctx context.Context, principal authn.Principal) ([]api.RepositorySummary, error) {
@@ -70,7 +78,32 @@ func (service *Service) Status(ctx context.Context, principal authn.Principal, r
 	if err != nil {
 		return api.RepositorySummary{}, err
 	}
-	return summarize(repository)
+	summary, err := summarize(repository)
+	if err != nil {
+		return api.RepositorySummary{}, err
+	}
+	return service.withSCIPStatus(ctx, repository, summary)
+}
+
+func (service *Service) withSCIPStatus(ctx context.Context, repo Repository, summary api.RepositorySummary) (api.RepositorySummary, error) {
+	summary.SCIPStatus = api.SCIPStatusUnknown
+	if service.SCIP == nil {
+		return summary, nil
+	}
+	commit, err := service.SCIP.SCIPIndexCommit(ctx, repo.ID)
+	if err != nil {
+		return api.RepositorySummary{}, err
+	}
+	summary.SCIPCommit = commit
+	switch {
+	case commit == "":
+		summary.SCIPStatus = api.SCIPStatusAbsent
+	case commit == repo.IndexedSHA:
+		summary.SCIPStatus = api.SCIPStatusCurrent
+	default:
+		summary.SCIPStatus = api.SCIPStatusStale
+	}
+	return summary, nil
 }
 
 func (service *Service) ReadFile(ctx context.Context, principal authn.Principal, request api.ReadFileRequest) (api.ReadFileResponse, error) {

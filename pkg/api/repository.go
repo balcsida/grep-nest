@@ -14,4 +14,16 @@ type RepositorySummary struct {
 	ErrorCode     string     `json:"error_code"`
 	SearchNode    string     `json:"search_node"`
 	LastIndexedAt *time.Time `json:"last_indexed_at,omitempty"`
+	// SCIPStatus reports whether code navigation is usable: "current", "stale",
+	// "absent", or "unknown". Search being healthy says nothing about SCIP, so
+	// callers need this to tell why navigation tools fail on an indexed repository.
+	SCIPStatus string `json:"scip_status"`
+	SCIPCommit string `json:"scip_commit,omitempty"`
 }
+
+const (
+	SCIPStatusCurrent = "current"
+	SCIPStatusStale   = "stale"
+	SCIPStatusAbsent  = "absent"
+	SCIPStatusUnknown = "unknown"
+)
